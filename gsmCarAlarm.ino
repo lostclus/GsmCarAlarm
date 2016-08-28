@@ -15,16 +15,15 @@ int alarmStatus = STATUS_DISARM;
 boolean smsOnStatusChange = false;
 
 boolean ledStatus = false;
-unsigned int ledChangeTime = 0;
+unsigned long ledChangeTime = 0;
 int alarmAlarmStatus = LOW;
-unsigned int alarmAlarmChangeTime = 0;
+unsigned long alarmAlarmChangeTime = 0;
 int alarmAlarmShortImpulseCount = 0;
-unsigned int alarmLedHighTime = 0;
+unsigned long alarmLedHighTime = 0;
+unsigned long modemInitTime = 0;
 
 
 void setup() {
-  String resp;
-  
   pinMode(LED_PIN, OUTPUT);
   pinMode(ALARM_ALARM_PIN, INPUT);
   pinMode(ALARM_LED_PIN, INPUT);
@@ -34,40 +33,8 @@ void setup() {
   
   Serial.begin(9600);
   Serial.println("GSM car alarm module");
-  
-  Serial.println("Initializing modem...");
-  modem.begin(9600);
-  
-  modem.println("ATH");
-  if ((resp = modem.readString()).indexOf("OK") == -1)
-    Serial.println("ATH failed!\n"
-                   "---\n" + resp + "\n---");
-  delay(100);
-  modem.println("ATE0");
-  if ((resp = modem.readString()).indexOf("OK") == -1)
-    Serial.println("ATE0 failed!\n"
-                   "---\n" + resp + "\n---");
-  delay(100);
-  modem.println("AT+CLIP=1");
-  if (!(resp = modem.readString()).indexOf("OK"))
-    Serial.println("AT+CLIP=1 failed!\n"
-                   "---\n" + resp + "\n---");
-  delay(100);
-  modem.println("AT+CMGF=1");
-  if (!(resp = modem.readString()).indexOf("OK"))
-    Serial.println("AT+CMGF=1 failed!\n"
-                   "---\n" + resp + "\n---");
-  delay(100);
-  modem.println("AT+CSCS=\"GSM\"");
-  if (!(resp = modem.readString()).indexOf("OK"))
-    Serial.println("AT+CSCS=\"GSM\" failed!\n"
-                   "---\n" + resp + "\n---");
-  delay(100);
-  modem.println("AT+CNMI=2,1");
-  if (!(resp = modem.readString()).indexOf("OK"))
-    Serial.println("AT+CNMI=2,1 failed!\n"
-                   "---\n" + resp + "\n---");
-  Serial.println("done");
+
+  modemInit();
 }
 
 void loop() {
@@ -78,7 +45,7 @@ void loop() {
 }
 
 void pinControl() {
-  unsigned int currentTime = millis();
+  unsigned long currentTime = millis();
   int newAlarmAlarmStatus = digitalRead(ALARM_ALARM_PIN);
   
   if (newAlarmAlarmStatus != alarmAlarmStatus) {
@@ -131,10 +98,54 @@ void monitorControl() {
   if (input == "test sms") sendSms("test SMS");
 }
 
+void modemInit() {
+  String resp;
+  
+  Serial.println("Initializing modem...");
+  modem.begin(9600);
+  
+  modem.println("ATH");
+  if ((resp = modem.readString()).indexOf("OK") == -1)
+    Serial.println("ATH failed!\n"
+                   "---\n" + resp + "\n---");
+  delay(100);
+  modem.println("ATE0");
+  if ((resp = modem.readString()).indexOf("OK") == -1)
+    Serial.println("ATE0 failed!\n"
+                   "---\n" + resp + "\n---");
+  delay(100);
+  modem.println("AT+CLIP=1");
+  if (!(resp = modem.readString()).indexOf("OK"))
+    Serial.println("AT+CLIP=1 failed!\n"
+                   "---\n" + resp + "\n---");
+  delay(100);
+  modem.println("AT+CMGF=1");
+  if (!(resp = modem.readString()).indexOf("OK"))
+    Serial.println("AT+CMGF=1 failed!\n"
+                   "---\n" + resp + "\n---");
+  delay(100);
+  modem.println("AT+CSCS=\"GSM\"");
+  if (!(resp = modem.readString()).indexOf("OK"))
+    Serial.println("AT+CSCS=\"GSM\" failed!\n"
+                   "---\n" + resp + "\n---");
+  delay(100);
+  modem.println("AT+CNMI=2,1");
+  if (!(resp = modem.readString()).indexOf("OK"))
+    Serial.println("AT+CNMI=2,1 failed!\n"
+                   "---\n" + resp + "\n---");
+  Serial.println("done");
+
+  modemInitTime = millis();
+}
+
 void modemControl() {
   String data;
   
-  if (!modem.available()) return;
+  if (!modem.available()) {
+    if ((millis() - modemInitTime) > (12 * 3600 * 1000L))
+      modemInit();
+    return;
+  }
   
   data = modem.readString();
   
@@ -158,7 +169,7 @@ void modemControl() {
       data.trim();
       if (data.endsWith("OK")) {
         int n = data.indexOf("\n");
-        if (n > 0) {
+          if (n > 0) {
           String header = data.substring(0, n);
           if (header.indexOf(CLIENT_PHONE_NUMBER) > 0) {
             String body = data.substring(n + 1, data.lastIndexOf("OK"));
@@ -189,8 +200,8 @@ void modemControl() {
 }
 
 void ledControl() {
-  unsigned int flashInterval;
-  unsigned int currentTime;
+  unsigned long flashInterval;
+  unsigned long currentTime;
   
   switch (alarmStatus) {
     case STATUS_DISARM:
@@ -334,3 +345,4 @@ void modemHangup() {
   Serial.println("Modem hangup: " + resp);
 }
 
+// vim:et:ci:pi:sts=0:sw=2:ts=2
