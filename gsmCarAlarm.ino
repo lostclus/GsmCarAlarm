@@ -1,3 +1,7 @@
+// TODO: спящий режим GSM модуля
+// TODO: измерение входного напряжения
+// TODO: запасное питание от кроны
+// TODO: пересылка SMS
 #include <SoftwareSerial.h>
 
 #define LED_PIN 13
