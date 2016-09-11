@@ -1,4 +1,3 @@
-// TODO: спящий режим GSM модуля
 // TODO: измерение входного напряжения
 // TODO: запасное питание от кроны
 // TODO: пересылка SMS
@@ -149,6 +148,12 @@ void modemInit() {
   for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
   if (resp.indexOf("OK") == -1)
     Serial.println("AT+CNMI=2,1 failed!\n"
+                   "---\n" + resp + "\n---");
+  delay(50);
+  modem.println("AT+ENPWRSAVE=1");
+  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
+  if (resp.indexOf("OK") == -1)
+    Serial.println("AT+ENPWRSAVE=1 failed!\n"
                    "---\n" + resp + "\n---");
   Serial.println("done");
 
