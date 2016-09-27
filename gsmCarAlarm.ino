@@ -1,19 +1,21 @@
-// TODO: измерение входного напряжения
 // TODO: запасное питание от кроны
 // TODO: пересылка SMS
 #include <SoftwareSerial.h>
 
 #define LED_PIN 13
 #define ALARM_ALARM_PIN 4
-#define ALARM_LED_PIN 5
+#define VIN_ANALOG_PIN 0
+#define VIN_R1 100000.0
+#define VIN_R2 10000.0
 
 #define STATUS_DISARM 0
 #define STATUS_ARM 1
 #define STATUS_PANIC 2
 
-const String CLIENT_PHONE_NUMBER = "0956182556";
+const char CLIENT_PHONE_NUMBER[] = "0956182556";
 
 SoftwareSerial modem(2, 3);
+char modemData[400];
 int alarmStatus = STATUS_DISARM;
 boolean smsOnStatusChange = false;
 
@@ -22,20 +24,41 @@ unsigned long ledChangeTime = 0;
 int alarmAlarmStatus = LOW;
 unsigned long alarmAlarmChangeTime = 0;
 int alarmAlarmShortImpulseCount = 0;
-unsigned long alarmLedHighTime = 0;
 unsigned long modemInitTime = 0;
 
+#define streq(s1, s2) strcmp(s1, s2) == 0
+
+
+char *modemReadData(SoftwareSerial &modem, char *buf, int maxLen) {
+  int len;
+  for (int c = 0; (len = modem.readBytes(buf, maxLen)) == 0 && c < 10; c++);
+  buf[len] = '\0';
+  return buf;
+}
+
+bool modemSendCommand(SoftwareSerial &modem, const char *command, const char *expect) {
+  modem.println(command);
+  modemReadData(modem, modemData, sizeof(modemData) / sizeof(char) - 1);
+  if (expect != NULL && !strstr(modemData, expect)) {
+    Serial.print(command);
+    Serial.println(F(" failed!"));
+    Serial.println(F("---"));
+    Serial.println(modemData);
+    Serial.println(F("---"));
+  }
+}
 
 void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(ALARM_ALARM_PIN, INPUT);
-  pinMode(ALARM_LED_PIN, INPUT);
+  analogReference(DEFAULT);
+  analogWrite(VIN_ANALOG_PIN, 0);
   
   delay(2000);
   digitalWrite(LED_PIN, LOW);
   
   Serial.begin(9600);
-  Serial.println("GSM car alarm module");
+  Serial.println(F("GSM car alarm module"));
 
   modemInit();
 }
@@ -61,101 +84,68 @@ void pinControl() {
     alarmAlarmStatus = newAlarmAlarmStatus;
   } else {
     if (currentTime - alarmAlarmChangeTime > 500) {
-        if (alarmAlarmStatus == LOW) {
-          if (alarmAlarmShortImpulseCount == 1 || alarmAlarmShortImpulseCount == 3)
-            setAlarmStatus(STATUS_ARM);
-          else if (alarmAlarmShortImpulseCount == 2 || alarmAlarmShortImpulseCount == 4)
-            setAlarmStatus(STATUS_DISARM);
-        } else {
-          if (currentTime - alarmAlarmChangeTime > 2000)
-            setAlarmStatus(STATUS_PANIC);
-        }
-        alarmAlarmShortImpulseCount = 0;
+      if (alarmAlarmStatus == LOW) {
+        if (alarmAlarmShortImpulseCount == 1 || alarmAlarmShortImpulseCount == 3)
+          setAlarmStatus(STATUS_ARM);
+        else if (alarmAlarmShortImpulseCount == 2 || alarmAlarmShortImpulseCount == 4)
+          setAlarmStatus(STATUS_DISARM);
+      } else {
+        if (currentTime - alarmAlarmChangeTime > 2000)
+          setAlarmStatus(STATUS_PANIC);
+      }
+      alarmAlarmShortImpulseCount = 0;
     }
-  }
-  
-  if (digitalRead(ALARM_LED_PIN) == HIGH) {
-    alarmLedHighTime = currentTime;
   }
 }
 
 void monitorControl() {
-  String input;
+  char input[100];
+  int len;
   
   if (!Serial.available()) return;
   
-  input = Serial.readString();
-  input.trim();
+  len = Serial.readBytes(input, sizeof(input) / sizeof(char) - 1);
+  input[len] = '\0';
   
-  if (input == "alarm status") showAlarmStatus();
-  if (input == "alarm status disarm") setAlarmStatus(STATUS_DISARM);
-  if (input == "alarm status arm") setAlarmStatus(STATUS_ARM);
-  if (input == "alarm status panic") setAlarmStatus(STATUS_PANIC);
-  if (input == "modem status") showModemStatus();
-  if (input == "modem reg") showModemReg();
-  if (input == "modem hangup") modemHangup();
-  if (input == "modem shutdown") modemShutdown();
-  if (input == "sms on") smsOnStatusChange = true;
-  if (input == "sms off") smsOnStatusChange = false;
-  if (input == "test call") call();
-  if (input == "test sms") sendSms("test SMS");
+  if (streq(input, "alarm status")) showAlarmStatus();
+  if (streq(input, "alarm status disarm")) setAlarmStatus(STATUS_DISARM);
+  if (streq(input, "alarm status arm")) setAlarmStatus(STATUS_ARM);
+  if (streq(input, "alarm status panic")) setAlarmStatus(STATUS_PANIC);
+  if (streq(input, "modem status")) showModemStatus();
+  if (streq(input, "modem reg")) showModemReg();
+  if (streq(input, "modem hangup")) modemHangup();
+  if (streq(input, "modem shutdown")) modemShutdown();
+  if (streq(input, "sms on")) smsOnStatusChange = true;
+  if (streq(input, "sms off")) smsOnStatusChange = false;
+  if (streq(input, "vin")) {
+    Serial.print(F("V input: "));
+    Serial.println(readVin());
+  }
+  if (streq(input, "test call")) call();
+  if (streq(input, "test sms")) sendSms("test SMS");
 }
 
 void modemInit() {
-  String resp;
-  
-  Serial.println("Initializing modem...");
+  Serial.println(F("Initializing modem..."));
   modem.begin(9600);
   modem.setTimeout(1000);
   
-  modem.println("ATH");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  if (resp.indexOf("OK") == -1)
-    Serial.println("ATH failed!\n"
-                   "---\n" + resp + "\n---");
+  modemSendCommand(modem, "ATH", "OK");
   delay(50);
-  modem.println("ATE0");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  if (resp.indexOf("OK") == -1)
-    Serial.println("ATE0 failed!\n"
-                   "---\n" + resp + "\n---");
+  modemSendCommand(modem, "ATE0", "OK");
   delay(50);
-  modem.println("AT+CLIP=1");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  if (resp.indexOf("OK") == -1)
-    Serial.println("AT+CLIP=1 failed!\n"
-                   "---\n" + resp + "\n---");
+  modemSendCommand(modem, "AT+CLIP=1", "OK");
   delay(50);
-  modem.println("AT+CMGF=1");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  if (resp.indexOf("OK") == -1)
-    Serial.println("AT+CMGF=1 failed!\n"
-                   "---\n" + resp + "\n---");
+  modemSendCommand(modem, "AT+CMGF=1", "OK");
   delay(50);
-  modem.println("AT+CSCS=\"GSM\"");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  if (resp.indexOf("OK") == -1)
-    Serial.println("AT+CSCS=\"GSM\" failed!\n"
-                   "---\n" + resp + "\n---");
+  modemSendCommand(modem, "AT+CSCS=\"GSM\"", "OK");
   delay(50);
-  modem.println("AT+CMGD=1,4");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  if (resp.indexOf("OK") == -1)
-    Serial.println("AT+CMGD=1,4 failed!\n"
-                   "---\n" + resp + "\n---");
+  modemSendCommand(modem, "AT+CMGD=1,4", "OK");
   delay(50);
-  modem.println("AT+CNMI=2,1");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  if (resp.indexOf("OK") == -1)
-    Serial.println("AT+CNMI=2,1 failed!\n"
-                   "---\n" + resp + "\n---");
+  modemSendCommand(modem, "AT+CNMI=2,1", "OK");
   delay(50);
-  modem.println("AT+ENPWRSAVE=1");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  if (resp.indexOf("OK") == -1)
-    Serial.println("AT+ENPWRSAVE=1 failed!\n"
-                   "---\n" + resp + "\n---");
-  Serial.println("done");
+  modemSendCommand(modem, "AT+ENPWRSAVE=1", "OK");
+  Serial.println(F("done"));
 
   modem.setTimeout(1000);
 
@@ -163,78 +153,96 @@ void modemInit() {
 }
 
 void modemControl() {
-  String data;
-  
+  char *c, cmd[12], *head, *body, sms[100];
+  int msgN = 0;
+  String bodyS;
+  boolean isAuthorized;
+
   if (!modem.available()) {
-    if ((millis() - modemInitTime) > (12 * 3600 * 1000L))
+    if ((millis() - modemInitTime) > (12L * 3600L * 1000L))
       modemInit();
     return;
   }
   
-  data = modem.readString();
+  modemReadData(modem, modemData, sizeof(modemData)/ sizeof(char) - 1);
   
-  if (data.indexOf("RING") >= 0) {
-    Serial.println("Ring detected");
-    boolean isAuthorized = data.indexOf(CLIENT_PHONE_NUMBER) >= 0;
-    modem.println("ATH");
-    modem.readString();
+  if (strstr(modemData, "RING")) {
+    Serial.println(F("Ring detected"));
+    isAuthorized = strstr(modemData, CLIENT_PHONE_NUMBER) != NULL;
+    modemSendCommand(modem, "ATH", "OK");
     if (isAuthorized) sendAlarmStatus();
-  } else if (data.indexOf("+CMTI:")) {
-    Serial.println("New SMS arrived");
-    int i = data.indexOf(",");
-    if (i > 0) i++;
-    int j = i;
-    while (j > 0 && j < data.length() && isDigit(data.charAt(j))) j++;
-    if (i > 0 && j > i) {
-      String msgN = data.substring(i, j);
-      modem.println("AT+CNMI=2,0");
-      for (int readCnt = 0; (data = modem.readString()) == "" && readCnt < 10; readCnt++);
-      if (data.indexOf("OK") == -1)
-      Serial.println("AT+CNMI=2,0 failed!\n"
-                     "---\n" + data + "\n---");
-      Serial.println("Reading SMS #" + msgN);
-      modem.println("AT+CMGR=" + msgN);
-      for (int readCnt = 0; (data = modem.readString()) == "" && readCnt < 10; readCnt++);
-      data.trim();
-      if (data.endsWith("OK")) {
-        int n = data.indexOf("\n");
-          if (n > 0) {
-          String header = data.substring(0, n);
-          if (header.indexOf(CLIENT_PHONE_NUMBER) > 0) {
-            String body = data.substring(n + 1, data.lastIndexOf("OK"));
-            body.trim();
-            body.toLowerCase();
-            if (body == "sms on") smsOnStatusChange = true;
-            if (body == "sms off") smsOnStatusChange = false;
-            /* if (body == "status") sendAlarmStatus(); */
-            sendSms("Alarm status is " +
-	            String((alarmStatus == STATUS_DISARM) ?
-		           "DISARM" : ((alarmStatus == STATUS_ARM) ? "ARM" : "PANIC")) + "\n"
-                    "SMS info is " + String(((smsOnStatusChange) ? "on" : "off")));
+  } else if (strstr(modemData, "+CMTI:")) {
+    Serial.println(F("New SMS arrived"));
+
+    for (c = strstr(modemData, ","); c != NULL && *c != '\0' && !isDigit(*c); c++);
+    for (; c != NULL && *c != '\0' && isDigit(*c); c++)
+      msgN = msgN * 10 + ((int)*c - '0');
+    if (msgN > 0) {
+      modemSendCommand(modem, "AT+CNMI=2,0", "OK");
+
+      Serial.print(F("Reading SMS #"));
+      Serial.println(msgN);
+      sprintf(cmd, "AT+CMGR=%d", msgN);
+      modem.println(cmd);
+      modemReadData(modem, modemData, sizeof(modemData) / sizeof(char) - 1);
+
+      head = body = NULL;
+      for (c = strchr(modemData, '\0') - 1; *c <= ' '; c--) *c = '\0';
+      if (strcmp(c - 1, "OK") == 0) {
+        for (head = modemData; *head <= ' '; head++);
+        if ((c = strpbrk(head, "\r\n")) != NULL) {
+          *c = '\0';
+          isAuthorized = strstr(head, CLIENT_PHONE_NUMBER) != NULL;
+          if (isAuthorized) {
+            for (body = c + 1; *body != '\0' && *body <= ' '; body++);
+            for (c = strchr(body, '\0') - 1; *c <= ' '; c--) *c = '\0';
           } else {
-            Serial.println("Unauthorized message");
+            Serial.print(F("Unauthorized message: "));
+            Serial.println(modemData);
           }
         } else {
-          Serial.println("Unable to read message header: " + data);
+          Serial.print(F("Read message failure: "));
+          Serial.println(modemData);
         }
       } else {
-        Serial.println("Read message failure: " + data);
+        Serial.print(F("Read message failure: "));
+        Serial.println(modemData);
       }
-      modem.println("AT+CMGD=" + msgN);
-      for (int readCnt = 0; (data = modem.readString()) == "" && readCnt < 10; readCnt++);
-      if (data.indexOf("OK") == -1)
-      Serial.println("AT+CMGD=" + msgN + " failed!\n"
-                     "---\n" + data + "\n---");
-      modem.println("AT+CNMI=2,1");
-      for (int readCnt = 0; (data = modem.readString()) == "" && readCnt < 10; readCnt++);
-      if (data.indexOf("OK") == -1)
-      Serial.println("AT+CNMI=2,1 failed!\n"
-                     "---\n" + data + "\n---");
+
+      if (body != NULL) {
+        bodyS = body;
+        bodyS.toLowerCase();
+      }
+
+      Serial.print(F("Deleting SMS #"));
+      Serial.println(msgN);
+      sprintf(cmd, "AT+CMGD=%d", msgN);
+      modemSendCommand(modem, cmd, "OK");
+
+      if (body != NULL) {
+        if (body == "sms on") smsOnStatusChange = true;
+        if (body == "sms off") smsOnStatusChange = false;
+        Serial.println(F("Sending SMS"));
+        sprintf(sms, "Alarm status is %s\n"
+                     "SMS info is %s\n"
+                     "V input: %dV",
+               ((alarmStatus == STATUS_DISARM) ?
+		             "DISARM" : ((alarmStatus == STATUS_ARM) ? "ARM" : "PANIC")),
+		           ((smsOnStatusChange) ? "on" : "off"),
+		           readVin());
+        sendSms(sms);
+        Serial.println(sms);
+        Serial.println(F("Sending SMS done"));
+      }
+
+      modemSendCommand(modem, "AT+CNMI=2,1", "OK");
     } else {
-      Serial.println("Unable to read message number: " + data);
+      Serial.print(F("Unable to read message number: "));
+      Serial.println(modemData);
     }
   } else {
-    Serial.println("Modem data arrived: " + data);
+    Serial.print(F("Modem data arrived: "));
+    Serial.println(modemData);
   }
 }
 
@@ -271,13 +279,13 @@ void ledControl() {
 void showAlarmStatus() {
   switch (alarmStatus) {
     case STATUS_DISARM:
-      Serial.println("Alarm status: disarm");
+      Serial.println(F("Alarm status: disarm"));
       break;
     case STATUS_ARM:
-      Serial.println("Alarm status: arm");
+      Serial.println(F("Alarm status: arm"));
       break;
     case STATUS_PANIC:
-      Serial.println("Alarm status: panic");
+      Serial.println(F("Alarm status: panic"));
       break;
   }
 }
@@ -319,65 +327,92 @@ void setAlarmStatus(int newStatus) {
   }
 }
 
-void sendSms(String text) {
-  String resp;
-  
-  modem.println("ATH");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
+void sendSms(const char *text) {
+  char cmd[30];
+
+  modemSendCommand(modem, "ATH", "OK");
   delay(50);
   
-  modem.println("AT+CMGS=\"" + CLIENT_PHONE_NUMBER + "\"");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
+  sprintf(cmd, "AT+CMGS=\"%s\"", CLIENT_PHONE_NUMBER);
+  modemSendCommand(modem, cmd, NULL);
   modem.print(text);
   modem.print((char)26);
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  resp.trim();
-  Serial.println("Send SMS: " + resp);
+  modemReadData(modem, modemData, sizeof(modemData)/ sizeof(char) - 1);
+
+  Serial.print(F("Send SMS: "));
+  Serial.println(modemData);
 }
 
 void call() {
-  String resp;
+  char cmd[30];
   
-  modem.println("ATD" + CLIENT_PHONE_NUMBER + ";");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  resp.trim();
-  Serial.println("Call: " + resp);
+  sprintf(cmd, "ATD%s;", CLIENT_PHONE_NUMBER);
+  modemSendCommand(modem, cmd, NULL);
+
+  Serial.print(F("Call: "));
+  Serial.println(modemData);
 }
 
 void showModemStatus() {
-  String resp;
-  
-  modem.println("AT+CPAS");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  resp.trim();
-  Serial.println("Modem status: " + resp);
+  modemSendCommand(modem, "AT+CPAS", NULL);
+  Serial.print(F("Modem status: "));
+  Serial.println(modemData);
 }
 
 void showModemReg() {
-  String resp;
-  
-  modem.println("AT+CREG?");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  resp.trim();
-  Serial.println("Modem registration: " + resp);
+  modemSendCommand(modem, "AT+CREG?", NULL);
+  Serial.print(F("Modem registration: "));
+  Serial.println(modemData);
 }
 
 void modemShutdown() {
-  String resp;
-  
-  modem.println("AT+CPWROFF");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  resp.trim();
-  Serial.println("Modem shutdown: " + resp);
+  modemSendCommand(modem, "AT+CPWROFF", NULL);
+  Serial.print(F("Modem shutdown: "));
+  Serial.println(modemData);
 }
 
 void modemHangup() {
-  String resp;
-  
-  modem.println("ATH");
-  for (int readCnt = 0; (resp = modem.readString()) == "" && readCnt < 10; readCnt++);
-  resp.trim();
-  Serial.println("Modem hangup: " + resp);
+  modemSendCommand(modem, "ATH", NULL);
+  Serial.print(F("Modem hangup: "));
+  Serial.println(modemData);
+}
+
+float readVin() {
+  byte i, count = 5;
+  float vcc = 0.0,
+        vpin = 0.0;
+
+  for (i = 0; i < count; i++) {
+    // Read 1.1V reference against AVcc
+    // set the reference to Vcc and the measurement to the internal 1.1V reference
+    #if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+        ADMUX = _BV(REFS0) | _BV(MUX4) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+    #elif defined (__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__)
+        ADMUX = _BV(MUX5) | _BV(MUX0);
+    #elif defined (__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
+        ADMUX = _BV(MUX3) | _BV(MUX2);
+    #else
+        // works on an Arduino 168 or 328
+        ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+    #endif
+
+    delay(3); // Wait for Vref to settle
+    ADCSRA |= _BV(ADSC); // Start conversion
+    while (bit_is_set(ADCSRA,ADSC)); // measuring
+
+    uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH
+    uint8_t high = ADCH; // unlocks both
+
+    vcc += (1.1 * 1023.0) / ((float)((high<<8) | low));
+    vpin += analogRead(VIN_ANALOG_PIN);
+
+    delay(10);
+  }
+
+  vcc = vcc / count;
+  vpin = vpin / count;
+
+  return (vpin * vcc) / 1024.0 / (VIN_R2 / (VIN_R1 + VIN_R2));
 }
 
 // vim:et:ci:pi:sts=0:sw=2:ts=2
