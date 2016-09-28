@@ -29,25 +29,6 @@ unsigned long modemInitTime = 0;
 #define streq(s1, s2) strcmp(s1, s2) == 0
 
 
-char *modemReadData(SoftwareSerial &modem, char *buf, int maxLen) {
-  int len;
-  for (int c = 0; (len = modem.readBytes(buf, maxLen)) == 0 && c < 10; c++);
-  buf[len] = '\0';
-  return buf;
-}
-
-bool modemSendCommand(SoftwareSerial &modem, const char *command, const char *expect) {
-  modem.println(command);
-  modemReadData(modem, modemData, sizeof(modemData) / sizeof(char) - 1);
-  if (expect != NULL && !strstr(modemData, expect)) {
-    Serial.print(command);
-    Serial.println(F(" failed!"));
-    Serial.println(F("---"));
-    Serial.println(modemData);
-    Serial.println(F("---"));
-  }
-}
-
 void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(ALARM_ALARM_PIN, INPUT);
@@ -113,6 +94,7 @@ void monitorControl() {
   if (streq(input, "alarm status arm")) setAlarmStatus(STATUS_ARM);
   if (streq(input, "alarm status panic")) setAlarmStatus(STATUS_PANIC);
   if (streq(input, "modem status")) showModemStatus();
+  if (streq(input, "modem init")) modemInit();
   if (streq(input, "modem reg")) showModemReg();
   if (streq(input, "modem hangup")) modemHangup();
   if (streq(input, "modem shutdown")) modemShutdown();
@@ -123,30 +105,39 @@ void monitorControl() {
   if (streq(input, "test sms")) sendSms("test SMS");
 }
 
+char *modemReadData(SoftwareSerial &modem, char *buf, int maxLen) {
+  int len;
+  for (int c = 0; (len = modem.readBytes(buf, maxLen)) == 0 && c < 20; c++);
+  buf[len] = '\0';
+  return buf;
+}
+
+bool modemSendCommand(SoftwareSerial &modem, const char *command, const char *expect) {
+  modem.println(command);
+  modemReadData(modem, modemData, sizeof(modemData) / sizeof(char) - 1);
+  if (expect != NULL && !strstr(modemData, expect)) {
+    Serial.print(command);
+    Serial.println(F(" failed!"));
+    Serial.println(F("---"));
+    Serial.println(modemData);
+    Serial.println(F("---"));
+  }
+}
+
 void modemInit() {
   Serial.println(F("Initializing modem..."));
   modem.begin(9600);
-  modem.setTimeout(1000);
-  
+  modem.setTimeout(500);
   modemSendCommand(modem, "ATH", "OK");
-  delay(50);
   modemSendCommand(modem, "ATE0", "OK");
-  delay(50);
   modemSendCommand(modem, "AT+CLIP=1", "OK");
-  delay(50);
   modemSendCommand(modem, "AT+CMGF=1", "OK");
-  delay(50);
   modemSendCommand(modem, "AT+CSCS=\"GSM\"", "OK");
-  delay(50);
   modemSendCommand(modem, "AT+CMGD=1,4", "OK");
-  delay(50);
   modemSendCommand(modem, "AT+CNMI=2,1", "OK");
-  delay(50);
   modemSendCommand(modem, "AT+ENPWRSAVE=1", "OK");
   Serial.println(F("done"));
-
   modem.setTimeout(1000);
-
   modemInitTime = millis();
 }
 
