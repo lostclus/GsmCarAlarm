@@ -5,8 +5,8 @@
 #define LED_PIN 13
 #define ALARM_ALARM_PIN 4
 #define VIN_ANALOG_PIN 0
-#define VIN_R1 100000.0
-#define VIN_R2 10000.0
+#define VIN_R1 100000L
+#define VIN_R2 10000L
 
 #define STATUS_DISARM 0
 #define STATUS_ARM 1
@@ -99,8 +99,9 @@ void pinControl() {
 }
 
 void monitorControl() {
-  char input[100];
+  char input[100], buf[20];
   int len;
+  unsigned int vin;
   
   if (!Serial.available()) return;
   
@@ -117,10 +118,7 @@ void monitorControl() {
   if (streq(input, "modem shutdown")) modemShutdown();
   if (streq(input, "sms on")) smsOnStatusChange = true;
   if (streq(input, "sms off")) smsOnStatusChange = false;
-  if (streq(input, "vin")) {
-    Serial.print(F("V input: "));
-    Serial.println(readVin());
-  }
+  if (streq(input, "vin")) showVinput();
   if (streq(input, "test call")) call();
   if (streq(input, "test sms")) sendSms("test SMS");
 }
@@ -157,6 +155,7 @@ void modemControl() {
   int msgN = 0;
   String bodyS;
   boolean isAuthorized;
+  unsigned int vin;
 
   if (!modem.available()) {
     if ((millis() - modemInitTime) > (12L * 3600L * 1000L))
@@ -222,14 +221,15 @@ void modemControl() {
       if (body != NULL) {
         if (body == "sms on") smsOnStatusChange = true;
         if (body == "sms off") smsOnStatusChange = false;
+        vin = readVinput() + 50;
         Serial.println(F("Sending SMS"));
         sprintf(sms, "Alarm status is %s\n"
                      "SMS info is %s\n"
-                     "V input: %dV",
+                     "V input: %d.%dV",
                ((alarmStatus == STATUS_DISARM) ?
 		             "DISARM" : ((alarmStatus == STATUS_ARM) ? "ARM" : "PANIC")),
 		           ((smsOnStatusChange) ? "on" : "off"),
-		           readVin());
+		           vin / 1000, vin % 1000 / 100);
         sendSms(sms);
         Serial.println(sms);
         Serial.println(F("Sending SMS done"));
@@ -377,10 +377,17 @@ void modemHangup() {
   Serial.println(modemData);
 }
 
-float readVin() {
+void showVinput() {
+  char buf[20];
+  unsigned int vin = readVinput() + 50;
+  sprintf(buf, "V input: %d.%dV", vin / 1000, vin % 1000 / 100);
+  Serial.println(buf);
+}
+
+unsigned int readVinput() {
   byte i, count = 5;
-  float vcc = 0.0,
-        vpin = 0.0;
+  unsigned long vcc = 0,
+                vpin = 0;
 
   for (i = 0; i < count; i++) {
     // Read 1.1V reference against AVcc
@@ -403,7 +410,8 @@ float readVin() {
     uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH
     uint8_t high = ADCH; // unlocks both
 
-    vcc += (1.1 * 1023.0) / ((float)((high<<8) | low));
+    // 1.1 * 1023 * 1000 = 1125300
+    vcc += 1125300L / ((unsigned long)((high<<8) | low));
     vpin += analogRead(VIN_ANALOG_PIN);
 
     delay(10);
@@ -412,7 +420,8 @@ float readVin() {
   vcc = vcc / count;
   vpin = vpin / count;
 
-  return (vpin * vcc) / 1024.0 / (VIN_R2 / (VIN_R1 + VIN_R2));
+  // return (vpin * vcc) / 1024 / (VIN_R2 / (VIN_R1 + VIN_R2));
+  return (vpin * vcc) / 1024 * (1000L / (VIN_R2 * 1000L / (VIN_R1 + VIN_R2)));
 }
 
 // vim:et:ci:pi:sts=0:sw=2:ts=2
