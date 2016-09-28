@@ -153,7 +153,6 @@ void modemInit() {
 void modemControl() {
   char *c, cmd[12], *head, *body, sms[100];
   int msgN = 0;
-  String bodyS;
   boolean isAuthorized;
   unsigned int vin;
 
@@ -195,6 +194,9 @@ void modemControl() {
           if (isAuthorized) {
             for (body = c + 1; *body != '\0' && *body <= ' '; body++);
             for (c = strchr(body, '\0') - 1; *c <= ' '; c--) *c = '\0';
+            c = strchr(body, '\0');
+            if (c != NULL && (c -= 2) >= body && streq(c, "OK"))
+              for (*c = '\0'; *c <= ' '; c--) *c = '\0';
           } else {
             Serial.print(F("Unauthorized message: "));
             Serial.println(modemData);
@@ -209,18 +211,15 @@ void modemControl() {
       }
 
       if (body != NULL) {
-        bodyS = body;
-        bodyS.toLowerCase();
-      }
+        for (c = body; *c != '\0'; c++)
+          if (*c >= 'A' && *c <= 'Z') *c -= 'A' - 'a';
 
-      Serial.print(F("Deleting SMS #"));
-      Serial.println(msgN);
-      sprintf(cmd, "AT+CMGD=%d", msgN);
-      modemSendCommand(modem, cmd, "OK");
+        Serial.print(F("Received command: "));
+        Serial.println(body);
 
-      if (body != NULL) {
-        if (body == "sms on") smsOnStatusChange = true;
-        if (body == "sms off") smsOnStatusChange = false;
+        if (streq(body, "sms on")) smsOnStatusChange = true;
+        if (streq(body, "sms off")) smsOnStatusChange = false;
+
         vin = readVinput() + 50;
         Serial.println(F("Sending SMS"));
         sprintf(sms, "Alarm status is %s\n"
@@ -231,9 +230,12 @@ void modemControl() {
 		           ((smsOnStatusChange) ? "on" : "off"),
 		           vin / 1000, vin % 1000 / 100);
         sendSms(sms);
-        Serial.println(sms);
-        Serial.println(F("Sending SMS done"));
       }
+
+      Serial.print(F("Deleting SMS #"));
+      Serial.println(msgN);
+      sprintf(cmd, "AT+CMGD=%d", msgN);
+      modemSendCommand(modem, cmd, "OK");
 
       modemSendCommand(modem, "AT+CNMI=2,1", "OK");
     } else {
