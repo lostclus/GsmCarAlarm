@@ -38,7 +38,7 @@ void setup() {
   delay(2000);
   digitalWrite(LED_PIN, LOW);
   
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println(F("GSM car alarm module"));
 
   modemInit();
@@ -126,16 +126,17 @@ bool modemSendCommand(SoftwareSerial &modem, const char *command, const char *ex
 
 void modemInit() {
   Serial.println(F("Initializing modem..."));
-  modem.begin(9600);
+  modem.begin(19200);
   modem.setTimeout(500);
-  modemSendCommand(modem, "ATH", "OK");
-  modemSendCommand(modem, "ATE0", "OK");
-  modemSendCommand(modem, "AT+CLIP=1", "OK");
-  modemSendCommand(modem, "AT+CMGF=1", "OK");
-  modemSendCommand(modem, "AT+CSCS=\"GSM\"", "OK");
-  modemSendCommand(modem, "AT+CMGD=1,4", "OK");
-  modemSendCommand(modem, "AT+CNMI=2,1", "OK");
-  modemSendCommand(modem, "AT+ENPWRSAVE=1", "OK");
+  modemSendCommand(modem, "AT", "OK"); // let modem auto detect baud rate
+  modemSendCommand(modem, "ATH", "OK"); // hanup
+  modemSendCommand(modem, "ATE0", "OK"); // echo off
+  modemSendCommand(modem, "AT+CLIP=1", "OK"); // enable +CLIP notification.
+  modemSendCommand(modem, "AT+CMGF=1", "OK"); // select SMS message format to text
+  modemSendCommand(modem, "AT+CSCS=\"GSM\"", "OK"); // select charset to GSM (7bit)
+  modemSendCommand(modem, "AT+CMGD=1,4", "OK"); // delete all SMS messages
+  modemSendCommand(modem, "AT+CNMI=2,1", "OK"); // new SMS message indication
+  //modemSendCommand(modem, "AT+ENPWRSAVE=1", "OK"); // power saving mode for M590
   Serial.println(F("done"));
   modem.setTimeout(1000);
   modemInitTime = millis();
