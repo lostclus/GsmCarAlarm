@@ -12,6 +12,9 @@
 #define STATUS_ARM 1
 #define STATUS_PANIC 2
 
+#define CONSOLE
+//#undef CONSOLE
+
 const char CLIENT_PHONE_NUMBER[] = "0956182556";
 
 SoftwareSerial modem(2, 3);
@@ -26,6 +29,14 @@ unsigned long alarmAlarmChangeTime = 0;
 int alarmAlarmShortImpulseCount = 0;
 unsigned long modemInitTime = 0;
 
+#ifdef CONSOLE
+#define PRINT(x) Serial.print(x)
+#define PRINTLN(x) Serial.println(x)
+#else
+#define PRINT(x) {}
+#define PRINTLN(x) {}
+#endif
+
 #define streq(s1, s2) strcmp(s1, s2) == 0
 
 
@@ -38,15 +49,19 @@ void setup() {
   delay(2000);
   digitalWrite(LED_PIN, LOW);
   
-  Serial.begin(115200);
-  Serial.println(F("GSM car alarm module"));
+  #ifdef CONSOLE
+  Serial.begin(19200);
+  #endif
+  PRINTLN(F("GSM car alarm module"));
 
   modemInit();
 }
 
 void loop() {
   pinControl();
-  monitorControl();
+  #ifdef CONSOLE
+  consoleControl();
+  #endif
   ledControl();
   modemControl();
 }
@@ -79,7 +94,8 @@ void pinControl() {
   }
 }
 
-void monitorControl() {
+#ifdef CONSOLE
+void consoleControl() {
   char input[100], buf[20];
   int len;
   unsigned int vin;
@@ -104,6 +120,7 @@ void monitorControl() {
   if (streq(input, "test call")) call();
   if (streq(input, "test sms")) sendSms("test SMS");
 }
+#endif
 
 char *modemReadData(SoftwareSerial &modem, char *buf, int maxLen) {
   int len;
@@ -116,16 +133,16 @@ bool modemSendCommand(SoftwareSerial &modem, const char *command, const char *ex
   modem.println(command);
   modemReadData(modem, modemData, sizeof(modemData) / sizeof(char) - 1);
   if (expect != NULL && !strstr(modemData, expect)) {
-    Serial.print(command);
-    Serial.println(F(" failed!"));
-    Serial.println(F("---"));
-    Serial.println(modemData);
-    Serial.println(F("---"));
+    PRINT(command);
+    PRINTLN(F(" failed!"));
+    PRINTLN(F("---"));
+    PRINTLN(modemData);
+    PRINTLN(F("---"));
   }
 }
 
 void modemInit() {
-  Serial.println(F("Initializing modem..."));
+  PRINTLN(F("Initializing modem..."));
   modem.begin(19200);
   modem.setTimeout(500);
   modemSendCommand(modem, "AT", "OK"); // let modem auto detect baud rate
@@ -137,7 +154,7 @@ void modemInit() {
   modemSendCommand(modem, "AT+CMGD=1,4", "OK"); // delete all SMS messages
   modemSendCommand(modem, "AT+CNMI=2,1", "OK"); // new SMS message indication
   //modemSendCommand(modem, "AT+ENPWRSAVE=1", "OK"); // power saving mode for M590
-  Serial.println(F("done"));
+  PRINTLN(F("done"));
   modem.setTimeout(1000);
   modemInitTime = millis();
 }
@@ -157,12 +174,12 @@ void modemControl() {
   modemReadData(modem, modemData, sizeof(modemData)/ sizeof(char) - 1);
   
   if (strstr(modemData, "RING")) {
-    Serial.println(F("Ring detected"));
+    PRINTLN(F("Ring detected"));
     isAuthorized = strstr(modemData, CLIENT_PHONE_NUMBER) != NULL;
     modemSendCommand(modem, "ATH", "OK");
     if (isAuthorized) sendAlarmStatus();
   } else if (strstr(modemData, "+CMTI:")) {
-    Serial.println(F("New SMS arrived"));
+    PRINTLN(F("New SMS arrived"));
 
     for (c = strstr(modemData, ","); c != NULL && *c != '\0' && !isDigit(*c); c++);
     for (; c != NULL && *c != '\0' && isDigit(*c); c++)
@@ -170,8 +187,8 @@ void modemControl() {
     if (msgN > 0) {
       modemSendCommand(modem, "AT+CNMI=2,0", "OK");
 
-      Serial.print(F("Reading SMS #"));
-      Serial.println(msgN);
+      PRINT(F("Reading SMS #"));
+      PRINTLN(msgN);
       sprintf(cmd, "AT+CMGR=%d", msgN);
       modem.println(cmd);
       modemReadData(modem, modemData, sizeof(modemData) / sizeof(char) - 1);
@@ -190,30 +207,30 @@ void modemControl() {
             if (c != NULL && (c -= 2) >= body && streq(c, "OK"))
               for (*c = '\0'; *c <= ' '; c--) *c = '\0';
           } else {
-            Serial.print(F("Unauthorized message: "));
-            Serial.println(modemData);
+            PRINT(F("Unauthorized message: "));
+            PRINTLN(modemData);
           }
         } else {
-          Serial.print(F("Read message failure: "));
-          Serial.println(modemData);
+          PRINT(F("Read message failure: "));
+          PRINTLN(modemData);
         }
       } else {
-        Serial.print(F("Read message failure: "));
-        Serial.println(modemData);
+        PRINT(F("Read message failure: "));
+        PRINTLN(modemData);
       }
 
       if (body != NULL) {
         for (c = body; *c != '\0'; c++)
           if (*c >= 'A' && *c <= 'Z') *c -= 'A' - 'a';
 
-        Serial.print(F("Received command: "));
-        Serial.println(body);
+        PRINT(F("Received command: "));
+        PRINTLN(body);
 
         if (streq(body, "sms on")) smsOnStatusChange = true;
         if (streq(body, "sms off")) smsOnStatusChange = false;
 
         vin = readVinput() + 50;
-        Serial.println(F("Sending SMS"));
+        PRINTLN(F("Sending SMS"));
         sprintf(sms, "Alarm status is %s\n"
                      "SMS info is %s\n"
                      "V input: %d.%dV",
@@ -224,19 +241,19 @@ void modemControl() {
         sendSms(sms);
       }
 
-      Serial.print(F("Deleting SMS #"));
-      Serial.println(msgN);
+      PRINT(F("Deleting SMS #"));
+      PRINTLN(msgN);
       sprintf(cmd, "AT+CMGD=%d", msgN);
       modemSendCommand(modem, cmd, "OK");
 
       modemSendCommand(modem, "AT+CNMI=2,1", "OK");
     } else {
-      Serial.print(F("Unable to read message number: "));
-      Serial.println(modemData);
+      PRINT(F("Unable to read message number: "));
+      PRINTLN(modemData);
     }
   } else {
-    Serial.print(F("Modem data arrived: "));
-    Serial.println(modemData);
+    PRINT(F("Modem data arrived: "));
+    PRINTLN(modemData);
   }
 }
 
@@ -273,13 +290,13 @@ void ledControl() {
 void showAlarmStatus() {
   switch (alarmStatus) {
     case STATUS_DISARM:
-      Serial.println(F("Alarm status: disarm"));
+      PRINTLN(F("Alarm status: disarm"));
       break;
     case STATUS_ARM:
-      Serial.println(F("Alarm status: arm"));
+      PRINTLN(F("Alarm status: arm"));
       break;
     case STATUS_PANIC:
-      Serial.println(F("Alarm status: panic"));
+      PRINTLN(F("Alarm status: panic"));
       break;
   }
 }
@@ -333,8 +350,8 @@ void sendSms(const char *text) {
   modem.print((char)26);
   modemReadData(modem, modemData, sizeof(modemData)/ sizeof(char) - 1);
 
-  Serial.print(F("Send SMS: "));
-  Serial.println(modemData);
+  PRINT(F("Send SMS: "));
+  PRINTLN(modemData);
 }
 
 void call() {
@@ -343,39 +360,39 @@ void call() {
   sprintf(cmd, "ATD%s;", CLIENT_PHONE_NUMBER);
   modemSendCommand(modem, cmd, NULL);
 
-  Serial.print(F("Call: "));
-  Serial.println(modemData);
+  PRINT(F("Call: "));
+  PRINTLN(modemData);
 }
 
 void showModemStatus() {
   modemSendCommand(modem, "AT+CPAS", NULL);
-  Serial.print(F("Modem status: "));
-  Serial.println(modemData);
+  PRINT(F("Modem status: "));
+  PRINTLN(modemData);
 }
 
 void showModemReg() {
   modemSendCommand(modem, "AT+CREG?", NULL);
-  Serial.print(F("Modem registration: "));
-  Serial.println(modemData);
+  PRINT(F("Modem registration: "));
+  PRINTLN(modemData);
 }
 
 void modemShutdown() {
   modemSendCommand(modem, "AT+CPWROFF", NULL);
-  Serial.print(F("Modem shutdown: "));
-  Serial.println(modemData);
+  PRINT(F("Modem shutdown: "));
+  PRINTLN(modemData);
 }
 
 void modemHangup() {
   modemSendCommand(modem, "ATH", NULL);
-  Serial.print(F("Modem hangup: "));
-  Serial.println(modemData);
+  PRINT(F("Modem hangup: "));
+  PRINTLN(modemData);
 }
 
 void showVinput() {
   char buf[20];
   unsigned int vin = readVinput() + 50;
   sprintf(buf, "V input: %d.%dV", vin / 1000, vin % 1000 / 100);
-  Serial.println(buf);
+  PRINTLN(buf);
 }
 
 unsigned int readVinput() {
