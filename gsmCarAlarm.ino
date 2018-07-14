@@ -96,7 +96,7 @@ void pinControl() {
 
 #ifdef CONSOLE
 void consoleControl() {
-  char input[100], buf[20];
+  char input[100], buf[150];
   int len;
   unsigned int vin;
   
@@ -104,7 +104,9 @@ void consoleControl() {
   
   len = Serial.readBytes(input, sizeof(input) / sizeof(char) - 1);
   input[len] = '\0';
+  input[strcspn(input, "\r\n")] = '\0';
   
+  if (streq(input, "status")) PRINTLN(getStatusText(buf));
   if (streq(input, "alarm status")) showAlarmStatus();
   if (streq(input, "alarm status disarm")) setAlarmStatus(STATUS_DISARM);
   if (streq(input, "alarm status arm")) setAlarmStatus(STATUS_ARM);
@@ -163,7 +165,6 @@ void modemControl() {
   char *c, cmd[12], *head, *body, sms[100];
   int msgN = 0;
   boolean isAuthorized;
-  unsigned int vin;
 
   if (!modem.available()) {
     if ((millis() - modemInitTime) > (12L * 3600L * 1000L))
@@ -229,16 +230,8 @@ void modemControl() {
         if (streq(body, "sms on")) smsOnStatusChange = true;
         if (streq(body, "sms off")) smsOnStatusChange = false;
 
-        vin = readVinput() + 50;
         PRINTLN(F("Sending SMS"));
-        sprintf(sms, "Alarm status is %s\n"
-                     "SMS info is %s\n"
-                     "V input: %d.%dV",
-               ((alarmStatus == STATUS_DISARM) ?
-		             "DISARM" : ((alarmStatus == STATUS_ARM) ? "ARM" : "PANIC")),
-		           ((smsOnStatusChange) ? "on" : "off"),
-		           vin / 1000, vin % 1000 / 100);
-        sendSms(sms);
+        sendSms(getStatusText(sms));
       }
 
       PRINT(F("Deleting SMS #"));
@@ -285,6 +278,27 @@ void ledControl() {
     digitalWrite(LED_PIN, (ledStatus ? HIGH : LOW));
     ledChangeTime = currentTime;
   }
+}
+
+char *getStatusText(char *str) {
+  unsigned int vin;
+  unsigned long uptime;
+
+  vin = readVinput() + 50;
+  uptime = millis() / 1000;
+  sprintf(str, "Alarm status is %s\n"
+               "SMS info is %s\n"
+               "Vin: %d.%dV\n"
+               "Uptime: %d %02d:%02d",
+         ((alarmStatus == STATUS_DISARM) ?
+		       "DISARM" : ((alarmStatus == STATUS_ARM) ?
+                       "ARM" : "PANIC")),
+		     ((smsOnStatusChange) ? "on" : "off"),
+		     vin / 1000, vin % 1000 / 100,
+         int(uptime / (24 * 3600)),
+         int((uptime % (24 * 3600)) / 3600),
+         int((uptime % 3600) / 60));
+  return str;
 }
 
 void showAlarmStatus() {
