@@ -18,7 +18,8 @@
 const char CLIENT_PHONE_NUMBER[] = "0956182556";
 
 SoftwareSerial modem(2, 3);
-char modemData[400];
+char modemDataBuf[400];
+char smsBuf[160];
 int alarmStatus = STATUS_DISARM;
 boolean smsOnStatusChange = false;
 
@@ -96,7 +97,7 @@ void pinControl() {
 
 #ifdef CONSOLE
 void consoleControl() {
-  char input[100], buf[150];
+  char input[50];
   int len;
   unsigned int vin;
   
@@ -106,7 +107,7 @@ void consoleControl() {
   input[len] = '\0';
   input[strcspn(input, "\r\n")] = '\0';
   
-  if (streq(input, "status")) PRINTLN(getStatusText(buf));
+  if (streq(input, "status")) PRINTLN(getStatusText(smsBuf));
   if (streq(input, "alarm status")) showAlarmStatus();
   if (streq(input, "alarm status disarm")) setAlarmStatus(STATUS_DISARM);
   if (streq(input, "alarm status arm")) setAlarmStatus(STATUS_ARM);
@@ -131,14 +132,17 @@ char *modemReadData(SoftwareSerial &modem, char *buf, int maxLen) {
   return buf;
 }
 
-bool modemSendCommand(SoftwareSerial &modem, const char *command, const char *expect) {
+bool modemSendCommand(SoftwareSerial &modem,
+                      const char *command,
+                      const char *expect) {
   modem.println(command);
-  modemReadData(modem, modemData, sizeof(modemData) / sizeof(char) - 1);
-  if (expect != NULL && !strstr(modemData, expect)) {
+  modemReadData(modem, modemDataBuf,
+                sizeof(modemDataBuf) / sizeof(char) - 1);
+  if (expect != NULL && !strstr(modemDataBuf, expect)) {
     PRINT(command);
     PRINTLN(F(" failed!"));
     PRINTLN(F("---"));
-    PRINTLN(modemData);
+    PRINTLN(modemDataBuf);
     PRINTLN(F("---"));
   }
 }
@@ -162,7 +166,7 @@ void modemInit() {
 }
 
 void modemControl() {
-  char *c, cmd[12], *head, *body, sms[100];
+  char *c, cmd[12], *head, *body;
   int msgN = 0;
   boolean isAuthorized;
 
@@ -172,17 +176,18 @@ void modemControl() {
     return;
   }
   
-  modemReadData(modem, modemData, sizeof(modemData)/ sizeof(char) - 1);
+  modemReadData(modem, modemDataBuf,
+                sizeof(modemDataBuf)/ sizeof(char) - 1);
   
-  if (strstr(modemData, "RING")) {
+  if (strstr(modemDataBuf, "RING")) {
     PRINTLN(F("Ring detected"));
-    isAuthorized = strstr(modemData, CLIENT_PHONE_NUMBER) != NULL;
+    isAuthorized = strstr(modemDataBuf, CLIENT_PHONE_NUMBER) != NULL;
     modemSendCommand(modem, "ATH", "OK");
     if (isAuthorized) sendAlarmStatus();
-  } else if (strstr(modemData, "+CMTI:")) {
+  } else if (strstr(modemDataBuf, "+CMTI:")) {
     PRINTLN(F("New SMS arrived"));
 
-    for (c = strstr(modemData, ","); c != NULL && *c != '\0' && !isDigit(*c); c++);
+    for (c = strstr(modemDataBuf, ","); c != NULL && *c != '\0' && !isDigit(*c); c++);
     for (; c != NULL && *c != '\0' && isDigit(*c); c++)
       msgN = msgN * 10 + ((int)*c - '0');
     if (msgN > 0) {
@@ -192,12 +197,13 @@ void modemControl() {
       PRINTLN(msgN);
       sprintf(cmd, "AT+CMGR=%d", msgN);
       modem.println(cmd);
-      modemReadData(modem, modemData, sizeof(modemData) / sizeof(char) - 1);
+      modemReadData(modem, modemDataBuf,
+                    sizeof(modemDataBuf) / sizeof(char) - 1);
 
       head = body = NULL;
-      for (c = strchr(modemData, '\0') - 1; *c <= ' '; c--) *c = '\0';
+      for (c = strchr(modemDataBuf, '\0') - 1; *c <= ' '; c--) *c = '\0';
       if (strcmp(c - 1, "OK") == 0) {
-        for (head = modemData; *head <= ' '; head++);
+        for (head = modemDataBuf; *head <= ' '; head++);
         if ((c = strpbrk(head, "\r\n")) != NULL) {
           *c = '\0';
           isAuthorized = strstr(head, CLIENT_PHONE_NUMBER) != NULL;
@@ -209,15 +215,15 @@ void modemControl() {
               for (*c = '\0'; *c <= ' '; c--) *c = '\0';
           } else {
             PRINT(F("Unauthorized message: "));
-            PRINTLN(modemData);
+            PRINTLN(modemDataBuf);
           }
         } else {
           PRINT(F("Read message failure: "));
-          PRINTLN(modemData);
+          PRINTLN(modemDataBuf);
         }
       } else {
         PRINT(F("Read message failure: "));
-        PRINTLN(modemData);
+        PRINTLN(modemDataBuf);
       }
 
       if (body != NULL) {
@@ -231,7 +237,7 @@ void modemControl() {
         if (streq(body, "sms off")) smsOnStatusChange = false;
 
         PRINTLN(F("Sending SMS"));
-        sendSms(getStatusText(sms));
+        sendSms(getStatusText(smsBuf));
       }
 
       PRINT(F("Deleting SMS #"));
@@ -242,11 +248,11 @@ void modemControl() {
       modemSendCommand(modem, "AT+CNMI=2,1", "OK");
     } else {
       PRINT(F("Unable to read message number: "));
-      PRINTLN(modemData);
+      PRINTLN(modemDataBuf);
     }
   } else {
     PRINT(F("Modem data arrived: "));
-    PRINTLN(modemData);
+    PRINTLN(modemDataBuf);
   }
 }
 
@@ -362,10 +368,11 @@ void sendSms(const char *text) {
   modemSendCommand(modem, cmd, NULL);
   modem.print(text);
   modem.print((char)26);
-  modemReadData(modem, modemData, sizeof(modemData)/ sizeof(char) - 1);
+  modemReadData(modem, modemDataBuf,
+                sizeof(modemDataBuf)/ sizeof(char) - 1);
 
   PRINT(F("Send SMS: "));
-  PRINTLN(modemData);
+  PRINTLN(modemDataBuf);
 }
 
 void call() {
@@ -375,31 +382,31 @@ void call() {
   modemSendCommand(modem, cmd, NULL);
 
   PRINT(F("Call: "));
-  PRINTLN(modemData);
+  PRINTLN(modemDataBuf);
 }
 
 void showModemStatus() {
   modemSendCommand(modem, "AT+CPAS", NULL);
   PRINT(F("Modem status: "));
-  PRINTLN(modemData);
+  PRINTLN(modemDataBuf);
 }
 
 void showModemReg() {
   modemSendCommand(modem, "AT+CREG?", NULL);
   PRINT(F("Modem registration: "));
-  PRINTLN(modemData);
+  PRINTLN(modemDataBuf);
 }
 
 void modemShutdown() {
   modemSendCommand(modem, "AT+CPWROFF", NULL);
   PRINT(F("Modem shutdown: "));
-  PRINTLN(modemData);
+  PRINTLN(modemDataBuf);
 }
 
 void modemHangup() {
   modemSendCommand(modem, "ATH", NULL);
   PRINT(F("Modem hangup: "));
-  PRINTLN(modemData);
+  PRINTLN(modemDataBuf);
 }
 
 void showVinput() {
