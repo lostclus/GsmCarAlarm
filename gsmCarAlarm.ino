@@ -1,5 +1,6 @@
 // TODO: запасное питание от кроны
 // TODO: пересылка SMS
+#include <string.h>
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
 
@@ -16,8 +17,8 @@
 #define STATUS_ARM 1
 #define STATUS_PANIC 2
 
-#define CONSOLE
-//#undef CONSOLE
+#define USE_CONSOLE
+//#undef USE_CONSOLE
 
 struct Settings {
   int magick;
@@ -36,7 +37,7 @@ Settings defaultSettings = {
 #define SETTINGS_ADDR 0
 
 SoftwareSerial modem(MODEM_RX_PIN, MODEM_TX_PIN);
-char modemDataBuf[400];
+char modemDataBuf[350];
 char smsBuf[160];
 int alarmStatus = STATUS_DISARM;
 
@@ -47,12 +48,12 @@ unsigned long alarmAlarmChangeTime = 0;
 int alarmAlarmShortImpulseCount = 0;
 unsigned long modemInitTime = 0;
 
-#ifdef CONSOLE
+#ifdef USE_CONSOLE
 #define PRINT(x) Serial.print(x)
 #define PRINTLN(x) Serial.println(x)
 #else
-#define PRINT(x) {}
-#define PRINTLN(x) {}
+#define PRINT(x) __asm__ __volatile__ ("nop\n\t")
+#define PRINTLN(x) __asm__ __volatile__ ("nop\n\t")
 #endif
 
 #define streq(s1, s2) strcmp(s1, s2) == 0
@@ -66,7 +67,7 @@ void setup() {
 
   digitalWrite(LED_PIN, LOW);
   
-  #ifdef CONSOLE
+  #ifdef USE_CONSOLE
   Serial.begin(19200);
   #endif
   PRINTLN(F("GSM Car Alarm"));
@@ -88,7 +89,7 @@ void setup() {
 
 void loop() {
   pinControl();
-  #ifdef CONSOLE
+  #ifdef USE_CONSOLE
   consoleControl();
   #endif
   ledControl();
@@ -98,6 +99,7 @@ void loop() {
 void pinControl() {
   unsigned long currentTime = millis();
   int newAlarmAlarmStatus = digitalRead(ALARM_ALARM_PIN);
+  int i;
   
   if (newAlarmAlarmStatus != alarmAlarmStatus) {
     if (newAlarmAlarmStatus == LOW) {
@@ -122,16 +124,21 @@ void pinControl() {
     }
   }
 
-  if (digitalRead(RESET_SETTINGS_PIN) == LOW) {
-    PRINTLN(F("Reset settings to defaults..."));
+  for (i = 10; digitalRead(RESET_SETTINGS_PIN) == LOW && i > 0; i--) delay(100);
+  if (i == 0) {
+    PRINTLN(F("Reseting settings to defaults..."));
     memcpy(&settings, &defaultSettings, sizeof(settings));
     EEPROM.put(SETTINGS_ADDR, settings);
-    delay(5000);
+    for (i = 50; i > 0; i--) {
+      digitalWrite(LED_PIN, HIGH);
+      delay(100);
+      digitalWrite(LED_PIN, LOW);
+    }
     PRINTLN(F("done"));
   }
 }
 
-#ifdef CONSOLE
+#ifdef USE_CONSOLE
 void consoleControl() {
   char input[50];
   int len;
@@ -151,6 +158,7 @@ void consoleControl() {
   if (streq(input, "modem status")) showModemStatus();
   if (streq(input, "modem init")) modemInit();
   if (streq(input, "modem reg")) showModemReg();
+  if (streq(input, "modem level")) showModemLevel();
   if (streq(input, "modem hangup")) modemHangup();
   if (streq(input, "modem shutdown")) modemShutdown();
   if (streq(input, "sms on")) {
@@ -466,6 +474,12 @@ void showModemStatus() {
 void showModemReg() {
   modemSendCommand(modem, "AT+CREG?", NULL);
   PRINT(F("Modem registration: "));
+  PRINTLN(modemDataBuf);
+}
+
+void showModemLevel() {
+  modemSendCommand(modem, "AT+CSQ", NULL);
+  PRINT(F("Modem signal level: "));
   PRINTLN(modemDataBuf);
 }
 
