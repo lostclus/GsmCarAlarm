@@ -36,7 +36,7 @@ Settings defaultSettings = {
 #define SETTINGS_ADDR 0
 
 SoftwareSerial modem(MODEM_RX_PIN, MODEM_TX_PIN);
-char modemDataBuf[300];
+char modemDataBuf[400];
 char smsBuf[160];
 int alarmStatus = STATUS_DISARM;
 
@@ -71,15 +71,15 @@ void setup() {
   #endif
   PRINTLN(F("GSM Car Alarm"));
 
-  PRINTLN("Reading settings from EEPROM...");
+  PRINTLN(F("Reading settings from EEPROM..."));
   EEPROM.get(SETTINGS_ADDR, settings);
   if (settings.magick != defaultSettings.magick) {
-    PRINTLN("No stored settings found, use defaults");
+    PRINTLN(F("No stored settings found, use defaults"));
     memcpy(&settings, &defaultSettings, sizeof(settings));
   } else {
-    PRINTLN("Use stored settings in EEPROM");
+    PRINTLN(F("Use stored settings in EEPROM"));
   }
-  PRINT("Client phone number: ");
+  PRINT(F("Client phone number: "));
   PRINTLN(settings.clientPhone);
 
   delay(2000);
@@ -123,11 +123,11 @@ void pinControl() {
   }
 
   if (digitalRead(RESET_SETTINGS_PIN) == LOW) {
-    PRINTLN("Reset settings to defaults...");
+    PRINTLN(F("Reset settings to defaults..."));
     memcpy(&settings, &defaultSettings, sizeof(settings));
     EEPROM.put(SETTINGS_ADDR, settings);
     delay(5000);
-    PRINTLN("done");
+    PRINTLN(F("done"));
   }
 }
 
