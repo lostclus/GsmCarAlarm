@@ -20,25 +20,30 @@
 #define USE_CONSOLE
 //#undef USE_CONSOLE
 
+#define SETTINGS_MAGICK 0x5555
+
 struct Settings {
   int magick;
   char clientPhone[16];
   boolean smsOnStatusChange;
 };
 
-Settings settings;
-Settings defaultSettings = {
-  0x5555,
+const Settings defaultSettings PROGMEM = {
+  SETTINGS_MAGICK,
   //"0956182556",
   "",
   false
 };
 
+Settings settings;
+
 #define SETTINGS_ADDR 0
 
 SoftwareSerial modem(MODEM_RX_PIN, MODEM_TX_PIN);
-char modemDataBuf[350];
-char smsBuf[160];
+char buffer[400];
+const char OK[] PROGMEM = "OK";
+const char NULL_STR[] PROGMEM = "";
+
 int alarmStatus = STATUS_DISARM;
 
 boolean ledStatus = false;
@@ -56,7 +61,7 @@ unsigned long modemInitTime = 0;
 #define PRINTLN(x) __asm__ __volatile__ ("nop\n\t")
 #endif
 
-#define streq(s1, s2) strcmp(s1, s2) == 0
+#define streq_P(s1, s2) strcmp_P(s1, s2) == 0
 
 void setup() {
   pinMode(ALARM_ALARM_PIN, INPUT);
@@ -74,9 +79,9 @@ void setup() {
 
   PRINTLN(F("Reading settings from EEPROM..."));
   EEPROM.get(SETTINGS_ADDR, settings);
-  if (settings.magick != defaultSettings.magick) {
+  if (settings.magick != SETTINGS_MAGICK) {
     PRINTLN(F("No stored settings found, use defaults"));
-    memcpy(&settings, &defaultSettings, sizeof(settings));
+    memcpy_P(&settings, &defaultSettings, sizeof(settings));
   } else {
     PRINTLN(F("Use stored settings in EEPROM"));
   }
@@ -127,7 +132,7 @@ void pinControl() {
   for (i = 10; digitalRead(RESET_SETTINGS_PIN) == LOW && i > 0; i--) delay(100);
   if (i == 0) {
     PRINTLN(F("Reseting settings to defaults..."));
-    memcpy(&settings, &defaultSettings, sizeof(settings));
+    memcpy_P(&settings, &defaultSettings, sizeof(settings));
     EEPROM.put(SETTINGS_ADDR, settings);
     for (i = 50; i > 0; i--) {
       digitalWrite(LED_PIN, HIGH);
@@ -150,73 +155,85 @@ void consoleControl() {
   input[len] = '\0';
   input[strcspn(input, "\r\n")] = '\0';
   
-  if (streq(input, "status")) PRINTLN(getStatusText(smsBuf));
-  if (streq(input, "alarm status")) showAlarmStatus();
-  if (streq(input, "alarm status disarm")) setAlarmStatus(STATUS_DISARM);
-  if (streq(input, "alarm status arm")) setAlarmStatus(STATUS_ARM);
-  if (streq(input, "alarm status panic")) setAlarmStatus(STATUS_PANIC);
-  if (streq(input, "modem status")) showModemStatus();
-  if (streq(input, "modem init")) modemInit();
-  if (streq(input, "modem reg")) showModemReg();
-  if (streq(input, "modem level")) showModemLevel();
-  if (streq(input, "modem hangup")) modemHangup();
-  if (streq(input, "modem shutdown")) modemShutdown();
-  if (streq(input, "sms on")) {
+  if (streq_P(input, PSTR("status"))) PRINTLN(getStatusText(buffer));
+  if (streq_P(input, PSTR("alarm status"))) showAlarmStatus();
+  if (streq_P(input, PSTR("alarm status disarm"))) setAlarmStatus(STATUS_DISARM);
+  if (streq_P(input, PSTR("alarm status arm"))) setAlarmStatus(STATUS_ARM);
+  if (streq_P(input, PSTR("alarm status panic"))) setAlarmStatus(STATUS_PANIC);
+  if (streq_P(input, PSTR("modem status"))) showModemStatus();
+  if (streq_P(input, PSTR("modem init"))) modemInit();
+  if (streq_P(input, PSTR("modem reg"))) showModemReg();
+  if (streq_P(input, PSTR("modem level"))) showModemLevel();
+  if (streq_P(input, PSTR("modem hangup"))) modemHangup();
+  if (streq_P(input, PSTR("modem shutdown"))) modemShutdown();
+  if (streq_P(input, PSTR("sms on"))) {
     settings.smsOnStatusChange = true;
     EEPROM.put(SETTINGS_ADDR, settings);
   }
-  if (streq(input, "sms off")) {
+  if (streq_P(input, PSTR("sms off"))) {
     settings.smsOnStatusChange = false;
     EEPROM.put(SETTINGS_ADDR, settings);
   }
-  if (streq(input, "vin")) showVinput();
-  if (streq(input, "test call")) call();
-  if (streq(input, "test sms")) sendSms("test SMS");
+  if (streq_P(input, PSTR("vin"))) showVinput();
+  if (streq_P(input, PSTR("test call"))) call();
+  if (streq_P(input, PSTR("test sms"))) sendSms_P(PSTR("test SMS"));
 }
 #endif
 
-char *modemReadData(SoftwareSerial &modem, char *buf, int maxLen) {
+char *modemReadData(char *buf, int maxLen) {
   int len;
   for (int c = 0; (len = modem.readBytes(buf, maxLen)) == 0 && c < 20; c++);
   buf[len] = '\0';
   return buf;
 }
 
-bool modemSendCommand(SoftwareSerial &modem,
-                      const char *command,
-                      const char *expect) {
-  modem.println(command);
-  modemReadData(modem, modemDataBuf,
-                sizeof(modemDataBuf) / sizeof(char) - 1);
-  if (expect != NULL && !strstr(modemDataBuf, expect)) {
+boolean modemCheckResponse(const char *command, const char *expect) {
+  modemReadData(buffer, sizeof(buffer) / sizeof(char) - 1);
+  if (expect[0] != '\0' && !strstr(buffer, expect)) {
     PRINT(command);
     PRINTLN(F(" failed!"));
     PRINTLN(F("---"));
-    PRINTLN(modemDataBuf);
+    PRINTLN(buffer);
     PRINTLN(F("---"));
+    return false;
   }
+  return true;
+}
+
+boolean modemSendCommand(const char *command, const char *expect) {
+  modem.println(command);
+  if (expect == NULL)
+    return true;
+  return modemCheckResponse(command, expect);
+}
+
+boolean modemSendCommand_P(const char *command, const char *expect) {
+  char cmd[150], ex[50];
+  return modemSendCommand(
+    strcpy_P(cmd, command),
+    (expect != NULL) ? strcpy_P(ex, expect) : NULL);
 }
 
 void modemInit() {
   PRINTLN(F("Initializing modem..."));
   modem.begin(19200);
   modem.setTimeout(500);
-  modemSendCommand(modem, "AT", "OK"); // let modem auto detect baud rate
-  modemSendCommand(modem, "ATH", "OK"); // hanup
-  modemSendCommand(modem, "ATE0", "OK"); // echo off
-  modemSendCommand(modem, "AT+CLIP=1", "OK"); // enable +CLIP notification.
-  modemSendCommand(modem, "AT+CMGF=1", "OK"); // select SMS message format to text
-  modemSendCommand(modem, "AT+CSCS=\"GSM\"", "OK"); // select charset to GSM (7bit)
-  modemSendCommand(modem, "AT+CMGD=1,4", "OK"); // delete all SMS messages
-  modemSendCommand(modem, "AT+CNMI=2,1", "OK"); // new SMS message indication
-  //modemSendCommand(modem, "AT+ENPWRSAVE=1", "OK"); // power saving mode for M590
+  modemSendCommand_P(PSTR("AT"), OK); // let modem auto detect baud rate
+  modemSendCommand_P(PSTR("ATH"), OK); // hanup
+  modemSendCommand_P(PSTR("ATE0"), OK); // echo off
+  modemSendCommand_P(PSTR("AT+CLIP=1"), OK); // enable +CLIP notification.
+  modemSendCommand_P(PSTR("AT+CMGF=1"), OK); // select SMS message format to text
+  modemSendCommand_P(PSTR("AT+CSCS=\"GSM\""), OK); // select charset to GSM (7bit)
+  modemSendCommand_P(PSTR("AT+CMGD=1,4"), OK); // delete all SMS messages
+  modemSendCommand_P(PSTR("AT+CNMI=2,1"), OK); // new SMS message indication
+  //modemSendCommand_P(PSTR("AT+ENPWRSAVE=1"), OK); // power saving mode for M590
   PRINTLN(F("done"));
   modem.setTimeout(1000);
   modemInitTime = millis();
 }
 
 void modemControl() {
-  char *c, cmd[12], *head, *phone, *body;
+  char buf[200], cmd[15], ex[5], *c, *head, *phone, *body;
   int msgN = 0;
   boolean isAuthorized;
 
@@ -226,34 +243,31 @@ void modemControl() {
     return;
   }
   
-  modemReadData(modem, modemDataBuf,
-                sizeof(modemDataBuf)/ sizeof(char) - 1);
+  modemReadData(buffer, sizeof(buffer)/ sizeof(char) - 1);
   
-  if (strstr(modemDataBuf, "RING")) {
+  if (strstr_P(buffer, PSTR("RING"))) {
     PRINTLN(F("Ring detected"));
-    isAuthorized = strstr(modemDataBuf, settings.clientPhone) != NULL;
-    modemSendCommand(modem, "ATH", "OK");
+    isAuthorized = strstr(buffer, settings.clientPhone) != NULL;
+    modemSendCommand_P(PSTR("ATH"), OK);
     if (isAuthorized) sendAlarmStatus();
-  } else if (strstr(modemDataBuf, "+CMTI:")) {
+  } else if (strstr(buffer, "+CMTI:")) {
     PRINTLN(F("New SMS arrived"));
 
-    for (c = strstr(modemDataBuf, ","); c != NULL && *c != '\0' && !isDigit(*c); c++);
+    for (c = strstr(buffer, ","); c != NULL && *c != '\0' && !isDigit(*c); c++);
     for (; c != NULL && *c != '\0' && isDigit(*c); c++)
       msgN = msgN * 10 + ((int)*c - '0');
     if (msgN > 0) {
-      modemSendCommand(modem, "AT+CNMI=2,0", "OK");
+      modemSendCommand_P(PSTR("AT+CNMI=2,0"), OK);
 
       PRINT(F("Reading SMS #"));
       PRINTLN(msgN);
-      sprintf(cmd, "AT+CMGR=%d", msgN);
-      modem.println(cmd);
-      modemReadData(modem, modemDataBuf,
-                    sizeof(modemDataBuf) / sizeof(char) - 1);
+      sprintf_P(cmd, PSTR("AT+CMGR=%d"), msgN);
+      modemSendCommand(cmd, strcpy_P(ex, NULL_STR));
 
       head = body = NULL;
-      for (c = strchr(modemDataBuf, '\0') - 1; *c <= ' '; c--) *c = '\0';
-      if (strcmp(c - 1, "OK") == 0) {
-        for (head = modemDataBuf; *head <= ' '; head++);
+      for (c = strchr(buffer, '\0') - 1; *c <= ' '; c--) *c = '\0';
+      if (strcmp_P(c - 1, OK) == 0) {
+        for (head = buffer; *head <= ' '; head++);
         if ((c = strpbrk(head, "\r\n")) != NULL) {
           *c = '\0';
           body = c + 1;
@@ -279,19 +293,19 @@ void modemControl() {
             for (; *body != '\0' && *body <= ' '; body++);
             for (c = strchr(body, '\0') - 1; *c <= ' '; c--) *c = '\0';
             c = strchr(body, '\0');
-            if (c != NULL && (c -= 2) >= body && streq(c, "OK"))
+            if (c != NULL && (c -= 2) >= body && streq_P(c, OK))
               for (*c = '\0'; *c <= ' '; c--) *c = '\0';
           } else {
             PRINT(F("Unauthorized message: "));
-            PRINTLN(modemDataBuf);
+            PRINTLN(buffer);
           }
         } else {
-          PRINT(F("Read message failure: "));
-          PRINTLN(modemDataBuf);
+          PRINT(F("Read message failure: No header found"));
+          PRINTLN(buffer);
         }
       } else {
-        PRINT(F("Read message failure: "));
-        PRINTLN(modemDataBuf);
+        PRINT(F("Read message failure: No OK respose found: "));
+        PRINTLN(buffer);
       }
 
       if (body != NULL) {
@@ -302,17 +316,17 @@ void modemControl() {
         PRINTLN(body);
 
         if (isAuthorized) {
-          if (streq(body, "sms on")) {
+          if (streq_P(body, PSTR("sms on"))) {
             settings.smsOnStatusChange = true;
             EEPROM.put(SETTINGS_ADDR, settings);
-          } else if (streq(body, "sms off")) {
+          } else if (streq_P(body, PSTR("sms off"))) {
             settings.smsOnStatusChange = false;
             EEPROM.put(SETTINGS_ADDR, settings);
           }
           PRINTLN(F("Sending SMS"));
-          sendSms(getStatusText(smsBuf));
+          sendSms(getStatusText(buf));
         }
-        if (streq(body, "remember me") && phone != NULL) {
+        if (streq_P(body, PSTR("remember me")) && phone != NULL) {
           PRINT(F("Changing client phone number to: "));
           PRINTLN(phone);
           strcpy(settings.clientPhone, phone);
@@ -322,17 +336,17 @@ void modemControl() {
 
       PRINT(F("Deleting SMS #"));
       PRINTLN(msgN);
-      sprintf(cmd, "AT+CMGD=%d", msgN);
-      modemSendCommand(modem, cmd, "OK");
+      sprintf_P(cmd, PSTR("AT+CMGD=%d"), msgN);
+      modemSendCommand(cmd, strcpy_P(ex, OK));
 
-      modemSendCommand(modem, "AT+CNMI=2,1", "OK");
+      modemSendCommand_P(PSTR("AT+CNMI=2,1"), OK);
     } else {
       PRINT(F("Unable to read message number: "));
-      PRINTLN(modemDataBuf);
+      PRINTLN(buffer);
     }
   } else {
     PRINT(F("Modem data arrived: "));
-    PRINTLN(modemDataBuf);
+    PRINTLN(buffer);
   }
 }
 
@@ -372,18 +386,20 @@ char *getStatusText(char *str) {
 
   vin = readVinput() + 50;
   uptime = millis() / 1000;
-  sprintf(str, "Alarm status is %s\n"
-               "SMS info is %s\n"
-               "Vin: %d.%dV\n"
-               "Uptime: %d %02d:%02d",
-         ((alarmStatus == STATUS_DISARM) ?
-		       "DISARM" : ((alarmStatus == STATUS_ARM) ?
-                       "ARM" : "PANIC")),
-		     ((settings.smsOnStatusChange) ? "on" : "off"),
-		     vin / 1000, vin % 1000 / 100,
-         int(uptime / (24 * 3600)),
-         int((uptime % (24 * 3600)) / 3600),
-         int((uptime % 3600) / 60));
+  sprintf_P(
+    str, PSTR(
+    "Alarm status is %s\n"
+    "SMS info is %s\n"
+    "Vin: %d.%dV\n"
+    "Uptime: %d %02d:%02d"),
+    ((alarmStatus == STATUS_DISARM) ?
+		  "DISARM" : ((alarmStatus == STATUS_ARM) ?
+                  "ARM" : "PANIC")),
+		((settings.smsOnStatusChange) ? "on" : "off"),
+		vin / 1000, vin % 1000 / 100,
+    int(uptime / (24 * 3600)),
+    int((uptime % (24 * 3600)) / 3600),
+    int((uptime % 3600) / 60));
   return str;
 }
 
@@ -404,13 +420,13 @@ void showAlarmStatus() {
 void sendAlarmStatus() {
   switch (alarmStatus) {
         case STATUS_DISARM:
-          sendSms("Alarm status is DISARM");
+          sendSms_P(PSTR("Alarm status is DISARM"));
           break;
         case STATUS_ARM:
-          sendSms("Alarm status is ARM");
+          sendSms_P(PSTR("Alarm status is ARM"));
           break;
         case STATUS_PANIC:
-          sendSms("Alarm status is PANIC");
+          sendSms_P(PSTR("Alarm status is PANIC"));
           break;
   }
 }
@@ -424,81 +440,86 @@ void setAlarmStatus(int newStatus) {
   switch (alarmStatus) {
     case STATUS_DISARM:
       if (settings.smsOnStatusChange)
-        sendSms("Alarm status changed to DISARM");
+        sendSms_P(PSTR("Alarm status changed to DISARM"));
       break;
     case STATUS_ARM:
       if (settings.smsOnStatusChange)
-        sendSms("Alarm status changed to ARM");
+        sendSms_P(PSTR("Alarm status changed to ARM"));
       break;
     case STATUS_PANIC:
       if (settings.smsOnStatusChange)
-        sendSms("Alarm status changed to PANIC");
+        sendSms_P(PSTR("Alarm status changed to PANIC"));
       call();
       break;
   }
 }
 
 void sendSms(const char *text) {
-  char cmd[30];
-
-  modemSendCommand(modem, "ATH", "OK");
+  modemSendCommand_P(PSTR("ATH"), OK);
   delay(50);
   
-  sprintf(cmd, "AT+CMGS=\"%s\"", settings.clientPhone);
-  modemSendCommand(modem, cmd, NULL);
-  modem.print(text);
-  modem.print((char)26);
-  modemReadData(modem, modemDataBuf,
-                sizeof(modemDataBuf)/ sizeof(char) - 1);
+  sprintf_P(buffer,
+            PSTR("AT+CMGS=\"%s\"\n%s\x1a"),
+            settings.clientPhone,
+            text);
+  modem.print(buffer);
+  modemReadData(buffer, sizeof(buffer)/ sizeof(char) - 1);
 
   PRINT(F("Send SMS: "));
-  PRINTLN(modemDataBuf);
+  PRINTLN(buffer);
+}
+
+void sendSms_P(const char *text) {
+  char buf[200];
+  sendSms(strcpy_P(buf, text));
 }
 
 void call() {
-  char cmd[30];
+  char cmd[30], ex[5];
   
-  sprintf(cmd, "ATD%s;", settings.clientPhone);
-  modemSendCommand(modem, cmd, NULL);
+  sprintf_P(cmd, PSTR("ATD%s;"),
+            settings.clientPhone);
+  modemSendCommand(cmd, strcpy_P(ex, NULL_STR));
 
   PRINT(F("Call: "));
-  PRINTLN(modemDataBuf);
+  PRINTLN(buffer);
 }
 
 void showModemStatus() {
-  modemSendCommand(modem, "AT+CPAS", NULL);
+  modemSendCommand_P(PSTR("AT+CPAS"), NULL_STR);
   PRINT(F("Modem status: "));
-  PRINTLN(modemDataBuf);
+  PRINTLN(buffer);
 }
 
 void showModemReg() {
-  modemSendCommand(modem, "AT+CREG?", NULL);
+  modemSendCommand_P(PSTR("AT+CREG?"), NULL_STR);
   PRINT(F("Modem registration: "));
-  PRINTLN(modemDataBuf);
+  PRINTLN(buffer);
 }
 
 void showModemLevel() {
-  modemSendCommand(modem, "AT+CSQ", NULL);
+  modemSendCommand_P(PSTR("AT+CSQ"), NULL_STR);
   PRINT(F("Modem signal level: "));
-  PRINTLN(modemDataBuf);
+  PRINTLN(buffer);
 }
 
 void modemShutdown() {
-  modemSendCommand(modem, "AT+CPWROFF", NULL);
+  modemSendCommand_P(PSTR("AT+CPWROFF"), NULL_STR);
   PRINT(F("Modem shutdown: "));
-  PRINTLN(modemDataBuf);
+  PRINTLN(buffer);
 }
 
 void modemHangup() {
-  modemSendCommand(modem, "ATH", NULL);
+  modemSendCommand_P(PSTR("ATH"), NULL_STR);
   PRINT(F("Modem hangup: "));
-  PRINTLN(modemDataBuf);
+  PRINTLN(buffer);
 }
 
 void showVinput() {
   char buf[20];
   unsigned int vin = readVinput() + 50;
-  sprintf(buf, "V input: %d.%dV", vin / 1000, vin % 1000 / 100);
+  sprintf_P(buf, PSTR("V input: %d.%dV"),
+            vin / 1000, vin % 1000 / 100);
   PRINTLN(buf);
 }
 
