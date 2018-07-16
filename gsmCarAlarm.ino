@@ -77,13 +77,13 @@ void setup() {
   #endif
   PRINTLN(F("GSM Car Alarm"));
 
-  PRINTLN(F("Reading settings from EEPROM..."));
+  PRINTLN(F("Reading settings from flash ROM..."));
   EEPROM.get(SETTINGS_ADDR, settings);
   if (settings.magick != SETTINGS_MAGICK) {
     PRINTLN(F("No stored settings found, use defaults"));
     memcpy_P(&settings, &defaultSettings, sizeof(settings));
   } else {
-    PRINTLN(F("Use stored settings in EEPROM"));
+    PRINTLN(F("Use stored settings in flash ROM"));
   }
   PRINT(F("Client phone number: "));
   PRINTLN(settings.clientPhone);
