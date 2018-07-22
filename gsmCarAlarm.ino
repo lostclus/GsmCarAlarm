@@ -129,14 +129,14 @@ void pinControl() {
     }
   }
 
-  for (i = 10; digitalRead(RESET_SETTINGS_PIN) == LOW && i > 0; i--) delay(100);
+  for (i = 20; digitalRead(RESET_SETTINGS_PIN) == LOW && i > 0; i--) delay(100);
   if (i == 0) {
     PRINTLN(F("Reseting settings to defaults..."));
     memcpy_P(&settings, &defaultSettings, sizeof(settings));
     EEPROM.put(SETTINGS_ADDR, settings);
-    for (i = 50; i > 0; i--) {
+    for (i = 5; i > 0; i--) {
       digitalWrite(LED_PIN, HIGH);
-      delay(100);
+      delay(500);
       digitalWrite(LED_PIN, LOW);
     }
     PRINTLN(F("done"));
