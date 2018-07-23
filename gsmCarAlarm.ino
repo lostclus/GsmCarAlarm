@@ -8,6 +8,7 @@
 #define MODEM_TX_PIN 3
 #define ALARM_ALARM_PIN 4
 #define RESET_SETTINGS_PIN 5
+#define BACKUP_POWER_PIN 6
 #define LED_PIN 13
 #define VIN_ANALOG_PIN 0
 #define VIN_R1 100000L
@@ -45,6 +46,7 @@ const char OK[] PROGMEM = "OK";
 const char NULL_STR[] PROGMEM = "";
 
 int alarmStatus = STATUS_DISARM;
+boolean onBackupPower = false;
 
 boolean ledStatus = false;
 unsigned long ledChangeTime = 0;
@@ -66,6 +68,7 @@ unsigned long modemInitTime = 0;
 void setup() {
   pinMode(ALARM_ALARM_PIN, INPUT);
   pinMode(RESET_SETTINGS_PIN, INPUT_PULLUP);
+  pinMode(BACKUP_POWER_PIN, INPUT);
   pinMode(LED_PIN, OUTPUT);
   analogReference(DEFAULT);
   analogWrite(VIN_ANALOG_PIN, 0);
@@ -104,6 +107,7 @@ void loop() {
 void pinControl() {
   unsigned long currentTime = millis();
   int newAlarmAlarmStatus = digitalRead(ALARM_ALARM_PIN);
+  boolean newOnBackupPower = digitalRead(BACKUP_POWER_PIN) == LOW;
   int i;
   
   if (newAlarmAlarmStatus != alarmAlarmStatus) {
@@ -126,6 +130,15 @@ void pinControl() {
           setAlarmStatus(STATUS_PANIC);
       }
       alarmAlarmShortImpulseCount = 0;
+    }
+  }
+
+  if (newOnBackupPower != onBackupPower) {
+    onBackupPower = newOnBackupPower;
+    if (onBackupPower) {
+      PRINTLN(F("On backup power"));
+    } else {
+      PRINTLN(F("On standard power"));
     }
   }
 
