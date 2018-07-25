@@ -18,8 +18,8 @@
 #define STATUS_ARM 1
 #define STATUS_PANIC 2
 
-#define USE_CONSOLE
-//#undef USE_CONSOLE
+#define WITH_CONSOLE
+//#undef WITH_CONSOLE
 
 #define SETTINGS_MAGICK 0x5555
 
@@ -55,7 +55,7 @@ unsigned long alarmAlarmChangeTime = 0;
 int alarmAlarmShortImpulseCount = 0;
 unsigned long modemInitTime = 0;
 
-#ifdef USE_CONSOLE
+#ifdef WITH_CONSOLE
 #define PRINT(x) Serial.print(x)
 #define PRINTLN(x) Serial.println(x)
 #else
@@ -75,7 +75,7 @@ void setup() {
 
   digitalWrite(LED_PIN, LOW);
   
-  #ifdef USE_CONSOLE
+  #ifdef WITH_CONSOLE
   Serial.begin(19200);
   #endif
   PRINTLN(F("GSM Car Alarm"));
@@ -97,7 +97,7 @@ void setup() {
 
 void loop() {
   pinControl();
-  #ifdef USE_CONSOLE
+  #ifdef WITH_CONSOLE
   consoleControl();
   #endif
   ledControl();
@@ -156,7 +156,7 @@ void pinControl() {
   }
 }
 
-#ifdef USE_CONSOLE
+#ifdef WITH_CONSOLE
 void consoleControl() {
   char input[50];
   int len;
