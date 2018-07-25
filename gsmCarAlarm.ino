@@ -1,5 +1,5 @@
-// TODO: запасное питание от кроны
-// TODO: пересылка SMS
+// TODO: SMS forwarding
+// TODO: speedup modem communication
 #include <string.h>
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
@@ -31,7 +31,6 @@ struct Settings {
 
 const Settings defaultSettings PROGMEM = {
   SETTINGS_MAGICK,
-  //"0956182556",
   "",
   false
 };
