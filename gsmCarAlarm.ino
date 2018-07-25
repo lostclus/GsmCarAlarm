@@ -46,13 +46,18 @@ const char OK[] PROGMEM = "OK";
 const char NULL_STR[] PROGMEM = "";
 
 int alarmStatus = STATUS_DISARM;
-boolean onBackupPower = false;
 
 boolean ledStatus = false;
 unsigned long ledChangeTime = 0;
+
 int alarmAlarmStatus = LOW;
 unsigned long alarmAlarmChangeTime = 0;
 int alarmAlarmShortImpulseCount = 0;
+
+int backupPowerStatus = LOW;
+unsigned long backupPowerChangeTime = 0;
+boolean onBackupPower = false;
+
 unsigned long modemInitTime = 0;
 
 #ifdef WITH_CONSOLE
@@ -106,11 +111,11 @@ void loop() {
 
 void pinControl() {
   unsigned long currentTime = millis();
-  int newAlarmAlarmStatus = digitalRead(ALARM_ALARM_PIN);
-  boolean newOnBackupPower = digitalRead(BACKUP_POWER_PIN) == LOW;
-  int i;
+  int newAlarmAlarmStatus,
+      newBackupPowerStatus,
+      i;
   
-  if (newAlarmAlarmStatus != alarmAlarmStatus) {
+  if ((newAlarmAlarmStatus = digitalRead(ALARM_ALARM_PIN)) != alarmAlarmStatus) {
     if (newAlarmAlarmStatus == LOW) {
       if (currentTime - alarmAlarmChangeTime <= 500) {
         alarmAlarmShortImpulseCount += 1;
@@ -118,27 +123,32 @@ void pinControl() {
     }
     alarmAlarmChangeTime = currentTime;
     alarmAlarmStatus = newAlarmAlarmStatus;
-  } else {
-    if (currentTime - alarmAlarmChangeTime > 500) {
-      if (alarmAlarmStatus == LOW) {
-        if (alarmAlarmShortImpulseCount == 1 || alarmAlarmShortImpulseCount == 3)
-          setAlarmStatus(STATUS_ARM);
-        else if (alarmAlarmShortImpulseCount == 2 || alarmAlarmShortImpulseCount == 4)
-          setAlarmStatus(STATUS_DISARM);
-      } else {
-        if (currentTime - alarmAlarmChangeTime > 2000)
-          setAlarmStatus(STATUS_PANIC);
-      }
-      alarmAlarmShortImpulseCount = 0;
+  } else if (currentTime - alarmAlarmChangeTime > 500) {
+    if (alarmAlarmStatus == LOW) {
+      if (alarmAlarmShortImpulseCount == 1 || alarmAlarmShortImpulseCount == 3)
+        setAlarmStatus(STATUS_ARM);
+      else if (alarmAlarmShortImpulseCount == 2 || alarmAlarmShortImpulseCount == 4)
+        setAlarmStatus(STATUS_DISARM);
+    } else {
+      if (currentTime - alarmAlarmChangeTime > 2000)
+        setAlarmStatus(STATUS_PANIC);
     }
+    alarmAlarmShortImpulseCount = 0;
   }
 
-  if (newOnBackupPower != onBackupPower) {
-    onBackupPower = newOnBackupPower;
+  if ((newBackupPowerStatus = digitalRead(BACKUP_POWER_PIN)) != backupPowerStatus) {
+    backupPowerChangeTime = currentTime;
+    backupPowerStatus = newBackupPowerStatus;
+  } else if (currentTime - backupPowerChangeTime > 500 &&
+             onBackupPower != (backupPowerStatus == LOW)) {
+    onBackupPower = backupPowerStatus == LOW;
     if (onBackupPower) {
       PRINTLN(F("On backup power"));
+      sendSms_P(PSTR("No standard power detected, using backup power supply"));
+      call();
     } else {
       PRINTLN(F("On standard power"));
+      sendSms_P(PSTR("Standard power supply was restored"));
     }
   }
 
@@ -403,12 +413,13 @@ char *getStatusText(char *str) {
     str, PSTR(
     "Alarm status is %s\n"
     "SMS info is %s\n"
-    "Vin: %d.%dV\n"
+    "%s: %d.%dV\n"
     "Uptime: %d %02d:%02d"),
     ((alarmStatus == STATUS_DISARM) ?
 		  "DISARM" : ((alarmStatus == STATUS_ARM) ?
                   "ARM" : "PANIC")),
 		((settings.smsOnStatusChange) ? "on" : "off"),
+		((onBackupPower) ? "Backup power" : "Standard power"),
 		vin / 1000, vin % 1000 / 100,
     int(uptime / (24 * 3600)),
     int((uptime % (24 * 3600)) / 3600),
