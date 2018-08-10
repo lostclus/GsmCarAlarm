@@ -1,6 +1,7 @@
-// TODO: speedup modem communication
+// TODO: Speedup modem communication
 // TODO: SMS forwarding
 // TODO: DTMF commands support
+// TODO: Send some sound signal or melody when calling or answering
 
 #include <string.h>
 #include <EEPROM.h>
