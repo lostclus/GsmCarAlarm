@@ -51,8 +51,6 @@ Settings settings;
 
 SoftwareSerial modem(MODEM_RX_PIN, MODEM_TX_PIN);
 char buffer[400];
-const char OK[] PROGMEM = "OK";
-const char NULL_STR[] PROGMEM = "";
 
 int alarmStatus = STATUS_DISARM;
 
@@ -192,8 +190,7 @@ void consoleControl() {
   
   if (!Serial.available()) return;
   
-  len = Serial.readBytes(input, sizeof(input) / sizeof(char) - 1);
-  input[len] = '\0';
+  input[Serial.readBytes(input, sizeof(input) - sizeof(char)) / sizeof(char)] = '\0';
   input[strcspn(input, "\r\n")] = '\0';
   
   if (streq_P(input, PSTR("status"))) PRINTLN(getStatusText(buffer));
@@ -221,55 +218,72 @@ void consoleControl() {
 }
 #endif
 
-char *modemReadData(char *buf, int maxLen) {
-  int len;
-  for (int c = 0; (len = modem.readBytes(buf, maxLen)) == 0 && c < 20; c++);
-  buf[len] = '\0';
-  return buf;
+char *modemReadData() {
+  buffer[modem.readBytes(buffer, sizeof(buffer) - sizeof(char)) / sizeof(char)] = '\0';
+  return buffer;
 }
 
-boolean modemCheckResponse(const char *command, const char *expect) {
-  modemReadData(buffer, sizeof(buffer) / sizeof(char) - 1);
-  if (expect[0] != '\0' && !strstr(buffer, expect)) {
-    PRINT(command);
-    PRINTLN(F(" failed!"));
-    PRINTLN(F("---"));
-    PRINTLN(buffer);
-    PRINTLN(F("---"));
-    return false;
+boolean modemCheckResponse(const char *command) {
+  unsigned long t = millis();
+
+  while (!modem.available()) {
+    delay(100);
+    if (millis() - t > 30000) {
+      PRINT(command);
+      PRINTLN(F(" failed! Timeout!"));
+      return false;
+    }
   }
+
+  modem.setTimeout(100);
+
+  while (true) {
+    modemReadData();
+
+    if (strstr_P(buffer, PSTR("OK\n")))
+      break;
+
+    if (strstr_P(buffer, PSTR("ERROR\n"))) {
+      PRINT(command);
+      PRINTLN(F(" failed!"));
+      return false;
+    }
+
+    if (millis() - t > 30000) {
+      PRINT(command);
+      PRINTLN(F(" failed! Timeout!"));
+      return false;
+    }
+  }
+
   return true;
 }
 
-boolean modemSendCommand(const char *command, const char *expect) {
+boolean modemSendCommand(const char *command, boolean checkResponse) {
   modem.println(command);
-  if (expect == NULL)
-    return true;
-  return modemCheckResponse(command, expect);
+  if (checkResponse)
+    return modemCheckResponse(command);
+  return true;
 }
 
-boolean modemSendCommand_P(const char *command, const char *expect) {
-  char cmd[150], ex[50];
-  return modemSendCommand(
-    strcpy_P(cmd, command),
-    (expect != NULL) ? strcpy_P(ex, expect) : NULL);
+boolean modemSendCommand_P(const char *command, boolean checkResponse) {
+  char cmd[150];
+  return modemSendCommand(strcpy_P(cmd, command), checkResponse);
 }
 
 void modemInit() {
   PRINTLN(F("Initializing modem..."));
   modem.begin(19200);
-  modem.setTimeout(500);
-  modemSendCommand_P(PSTR("AT"), OK); // let modem auto detect baud rate
-  modemSendCommand_P(PSTR("ATH"), OK); // hanup
-  modemSendCommand_P(PSTR("ATE0"), OK); // echo off
-  modemSendCommand_P(PSTR("AT+CLIP=1"), OK); // enable +CLIP notification.
-  modemSendCommand_P(PSTR("AT+CMGF=1"), OK); // select SMS message format to text
-  modemSendCommand_P(PSTR("AT+CSCS=\"GSM\""), OK); // select charset to GSM (7bit)
-  modemSendCommand_P(PSTR("AT+CMGD=1,4"), OK); // delete all SMS messages
-  modemSendCommand_P(PSTR("AT+CNMI=2,1"), OK); // new SMS message indication
-  //modemSendCommand_P(PSTR("AT+ENPWRSAVE=1"), OK); // power saving mode for M590
+  modemSendCommand_P(PSTR("AT"), true); // let modem auto detect baud rate
+  modemSendCommand_P(PSTR("ATH"), true); // hanup
+  modemSendCommand_P(PSTR("ATE0"), true); // echo off
+  modemSendCommand_P(PSTR("AT+CLIP=1"), true); // enable +CLIP notification.
+  modemSendCommand_P(PSTR("AT+CMGF=1"), true); // select SMS message format to text
+  modemSendCommand_P(PSTR("AT+CSCS=\"GSM\""), true); // select charset to GSM (7bit)
+  modemSendCommand_P(PSTR("AT+CMGD=1,4"), true); // delete all SMS messages
+  modemSendCommand_P(PSTR("AT+CNMI=2,1"), true); // new SMS message indication
+  //modemSendCommand_P(PSTR("AT+ENPWRSAVE=1"), true); // power saving mode for M590
   PRINTLN(F("done"));
-  modem.setTimeout(1000);
   modemInitTime = millis();
 }
 
@@ -284,12 +298,13 @@ void modemControl() {
     return;
   }
   
-  modemReadData(buffer, sizeof(buffer)/ sizeof(char) - 1);
+  modem.setTimeout(1000);
+  modemReadData();
   
   if (strstr_P(buffer, PSTR("RING"))) {
     PRINTLN(F("Ring detected"));
     isAuthorized = strstr(buffer, settings.clientPhone) != NULL;
-    modemSendCommand_P(PSTR("ATH"), OK);
+    modemSendCommand_P(PSTR("ATH"), true);
     if (isAuthorized) sendAlarmStatus();
   } else if (strstr(buffer, "+CMTI:")) {
     PRINTLN(F("New SMS arrived"));
@@ -298,16 +313,18 @@ void modemControl() {
     for (; c != NULL && *c != '\0' && isDigit(*c); c++)
       msgN = msgN * 10 + ((int)*c - '0');
     if (msgN > 0) {
-      modemSendCommand_P(PSTR("AT+CNMI=2,0"), OK);
+      modemSendCommand_P(PSTR("AT+CNMI=2,0"), true);
 
       PRINT(F("Reading SMS #"));
       PRINTLN(msgN);
       sprintf_P(cmd, PSTR("AT+CMGR=%d"), msgN);
-      modemSendCommand(cmd, strcpy_P(ex, NULL_STR));
+      modemSendCommand(cmd, false);
+      modem.setTimeout(1000);
+      modemReadData();
 
       head = body = NULL;
       for (c = strchr(buffer, '\0') - 1; *c <= ' '; c--) *c = '\0';
-      if (strcmp_P(c - 1, OK) == 0) {
+      if (strcmp_P(c - 1, PSTR("OK")) == 0) {
         for (head = buffer; *head <= ' '; head++);
         if ((c = strpbrk(head, "\r\n")) != NULL) {
           *c = '\0';
@@ -334,7 +351,7 @@ void modemControl() {
             for (; *body != '\0' && *body <= ' '; body++);
             for (c = strchr(body, '\0') - 1; *c <= ' '; c--) *c = '\0';
             c = strchr(body, '\0');
-            if (c != NULL && (c -= 2) >= body && streq_P(c, OK))
+            if (c != NULL && (c -= 2) >= body && streq_P(c, PSTR("OK")))
               for (*c = '\0'; *c <= ' '; c--) *c = '\0';
           } else {
             PRINT(F("Unauthorized message: "));
@@ -378,9 +395,9 @@ void modemControl() {
       PRINT(F("Deleting SMS #"));
       PRINTLN(msgN);
       sprintf_P(cmd, PSTR("AT+CMGD=%d"), msgN);
-      modemSendCommand(cmd, strcpy_P(ex, OK));
+      modemSendCommand(cmd, true);
 
-      modemSendCommand_P(PSTR("AT+CNMI=2,1"), OK);
+      modemSendCommand_P(PSTR("AT+CNMI=2,1"), true);
     } else {
       PRINT(F("Unable to read message number: "));
       PRINTLN(buffer);
@@ -501,7 +518,7 @@ void setAlarmStatus(int newStatus) {
 }
 
 void sendSms(const char *text) {
-  modemSendCommand_P(PSTR("ATH"), OK);
+  modemSendCommand_P(PSTR("ATH"), true);
   delay(50);
   
   sprintf_P(buffer,
@@ -509,7 +526,8 @@ void sendSms(const char *text) {
             settings.clientPhone,
             text);
   modem.print(buffer);
-  modemReadData(buffer, sizeof(buffer)/ sizeof(char) - 1);
+  modem.setTimeout(1000);
+  modemReadData();
 
   PRINT(F("Send SMS: "));
   PRINTLN(buffer);
@@ -525,38 +543,45 @@ void call() {
   
   sprintf_P(cmd, PSTR("ATD%s;"),
             settings.clientPhone);
-  modemSendCommand(cmd, strcpy_P(ex, NULL_STR));
+  modemSendCommand(cmd, false);
+  modem.setTimeout(1000);
+  modemReadData();
 
   PRINT(F("Call: "));
   PRINTLN(buffer);
 }
 
 void showModemStatus() {
-  modemSendCommand_P(PSTR("AT+CPAS"), NULL_STR);
+  modemSendCommand_P(PSTR("AT+CPAS"), false);
+  modemReadData();
   PRINT(F("Modem status: "));
   PRINTLN(buffer);
 }
 
 void showModemReg() {
-  modemSendCommand_P(PSTR("AT+CREG?"), NULL_STR);
+  modemSendCommand_P(PSTR("AT+CREG?"), false);
+  modemReadData();
   PRINT(F("Modem registration: "));
   PRINTLN(buffer);
 }
 
 void showModemLevel() {
-  modemSendCommand_P(PSTR("AT+CSQ"), NULL_STR);
+  modemSendCommand_P(PSTR("AT+CSQ"), false);
+  modemReadData();
   PRINT(F("Modem signal level: "));
   PRINTLN(buffer);
 }
 
 void modemShutdown() {
-  modemSendCommand_P(PSTR("AT+CPWROFF"), NULL_STR);
+  modemSendCommand_P(PSTR("AT+CPWROFF"), false);
+  modemReadData();
   PRINT(F("Modem shutdown: "));
   PRINTLN(buffer);
 }
 
 void modemHangup() {
-  modemSendCommand_P(PSTR("ATH"), NULL_STR);
+  modemSendCommand_P(PSTR("ATH"), false);
+  modemReadData();
   PRINT(F("Modem hangup: "));
   PRINTLN(buffer);
 }
