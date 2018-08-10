@@ -1,5 +1,7 @@
-// TODO: SMS forwarding
 // TODO: speedup modem communication
+// TODO: SMS forwarding
+// TODO: DTMF commands support
+
 #include <string.h>
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
