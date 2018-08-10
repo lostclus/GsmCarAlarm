@@ -4,11 +4,21 @@
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
 
+#define WITH_CONSOLE
+//#undef WITH_CONSOLE
+
+#define WITH_BACKUP_POWER
+//#undef WITH_BACKUP_POWER
+
 #define MODEM_RX_PIN 2
 #define MODEM_TX_PIN 3
 #define ALARM_ALARM_PIN 4
 #define RESET_SETTINGS_PIN 5
+
+#ifdef WITH_BACKUP_POWER
 #define BACKUP_POWER_PIN 6
+#endif
+
 #define LED_PIN 13
 #define VIN_ANALOG_PIN 0
 #define VIN_R1 100000L
@@ -18,10 +28,9 @@
 #define STATUS_ARM 1
 #define STATUS_PANIC 2
 
-#define WITH_CONSOLE
-//#undef WITH_CONSOLE
-
 #define SETTINGS_MAGICK 0x5555
+#define SETTINGS_ADDR 0
+
 
 struct Settings {
   int magick;
@@ -37,8 +46,6 @@ const Settings defaultSettings PROGMEM = {
 
 Settings settings;
 
-#define SETTINGS_ADDR 0
-
 SoftwareSerial modem(MODEM_RX_PIN, MODEM_TX_PIN);
 char buffer[400];
 const char OK[] PROGMEM = "OK";
@@ -53,9 +60,11 @@ int alarmAlarmStatus = LOW;
 unsigned long alarmAlarmChangeTime = 0;
 int alarmAlarmShortImpulseCount = 0;
 
+#ifdef WITH_BACKUP_POWER
 int backupPowerStatus = LOW;
 unsigned long backupPowerChangeTime = 0;
 boolean onBackupPower = false;
+#endif
 
 unsigned long modemInitTime = 0;
 
@@ -69,10 +78,13 @@ unsigned long modemInitTime = 0;
 
 #define streq_P(s1, s2) strcmp_P(s1, s2) == 0
 
+
 void setup() {
   pinMode(ALARM_ALARM_PIN, INPUT);
   pinMode(RESET_SETTINGS_PIN, INPUT_PULLUP);
+  #ifdef WITH_BACKUP_POWER
   pinMode(BACKUP_POWER_PIN, INPUT);
+  #endif
   pinMode(LED_PIN, OUTPUT);
   analogReference(DEFAULT);
   analogWrite(VIN_ANALOG_PIN, 0);
@@ -111,7 +123,9 @@ void loop() {
 void pinControl() {
   unsigned long currentTime = millis();
   int newAlarmAlarmStatus,
+  #ifdef WITH_BACKUP_POWER
       newBackupPowerStatus,
+  #endif
       i;
   
   if ((newAlarmAlarmStatus = digitalRead(ALARM_ALARM_PIN)) != alarmAlarmStatus) {
@@ -135,6 +149,7 @@ void pinControl() {
     alarmAlarmShortImpulseCount = 0;
   }
 
+  #ifdef WITH_BACKUP_POWER
   if ((newBackupPowerStatus = digitalRead(BACKUP_POWER_PIN)) != backupPowerStatus) {
     backupPowerChangeTime = currentTime;
     backupPowerStatus = newBackupPowerStatus;
@@ -150,6 +165,7 @@ void pinControl() {
       sendSms_P(PSTR("Standard power supply was restored"));
     }
   }
+  #endif
 
   for (i = 20; digitalRead(RESET_SETTINGS_PIN) == LOW && i > 0; i--) delay(100);
   if (i == 0) {
@@ -418,7 +434,11 @@ char *getStatusText(char *str) {
 		  "DISARM" : ((alarmStatus == STATUS_ARM) ?
                   "ARM" : "PANIC")),
 		((settings.smsOnStatusChange) ? "on" : "off"),
+		#ifdef WITH_BACKUP_POWER
 		((onBackupPower) ? "Backup power" : "Standard power"),
+		#else
+		"Vinput",
+		#endif
 		vin / 1000, vin % 1000 / 100,
     int(uptime / (24 * 3600)),
     int((uptime % (24 * 3600)) / 3600),
