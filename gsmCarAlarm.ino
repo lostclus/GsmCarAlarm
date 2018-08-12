@@ -282,6 +282,9 @@ void modemInit() {
   modemSendCommand_P(PSTR("AT+CSCS=\"GSM\""), 5000); // select charset to GSM (7bit)
   modemSendCommand_P(PSTR("AT+CMGD=1,4"), 5000); // delete all SMS messages
   modemSendCommand_P(PSTR("AT+CNMI=2,1"), 5000); // new SMS message indication
+  #ifndef WITH_CONSOLE
+  modemSendCommand_P(PSTR("AT&W"), 5000); // write current profile
+  #endif
   //modemSendCommand_P(PSTR("AT+ENPWRSAVE=1"), true); // power saving mode for M590
   PRINTLN(F("done"));
   modemInitTime = millis();
