@@ -204,8 +204,8 @@ void consoleControl() {
   if (streq_P(input, PSTR("modem level"))) showModemLevel();
   if (streq_P(input, PSTR("modem hangup"))) modemHangup();
   if (streq_P(input, PSTR("modem shutdown"))) modemShutdown();
-  if (strncmp_P(input, PSTR("at"), 2) ||
-      strncmp_P(input, PSTR("AT"), 2)) modem.println(input);
+  if (!strncmp_P(input, PSTR("at"), 2) ||
+      !strncmp_P(input, PSTR("AT"), 2)) modem.println(input);
   if (streq_P(input, PSTR("sms on"))) {
     settings.smsOnStatusChange = true;
     EEPROM.put(SETTINGS_ADDR, settings);
@@ -245,10 +245,11 @@ boolean modemCheckResponse(const char *command, int timeout) {
       if (strstr_P(buffer, PSTR("OK\r")))
         break;
 
-      PRINT(F("Modem data readed: "));
+      PRINT(F("Modem data read: "));
       PRINTLN(buffer);
 
-      if (strstr_P(buffer, PSTR("ERROR\r"))) {
+      if (strstr_P(buffer, PSTR("ERROR\r")) ||
+          strstr_P(buffer, PSTR("ERROR:"))) {
         PRINT(command);
         PRINTLN(F(" failed!"));
         return false;
@@ -532,27 +533,42 @@ void setAlarmStatus(int newStatus) {
   }
 }
 
-void sendSms(const char *text) {
+boolean sendSms(const char *text) {
+  boolean promptFound, result;
+  char cmd[30];
+
   modemSendCommand_P(PSTR("ATH1"), 5000);
-  sprintf_P(buffer,
-            PSTR("AT+CMGS=\"%s\"\n%s\x1a"),
-            settings.clientPhone,
-            text);
-  modem.println(buffer);
 
-  buffer[0] = '\0';
-  modem.setTimeout(1000);
-  for (int i=0; buffer[0] == '\0' && i<10; i++) {
+  sprintf_P(cmd,
+            PSTR("AT+CMGS=\"%s\""),
+            settings.clientPhone);
+  modemSendCommand(cmd, 0);
+
+  promptFound = false;
+  modem.setTimeout(100);
+  for (int i=0; i<50; i++) {
     modemReadData();
+    if (strstr_P(buffer, PSTR(">"))) {
+      promptFound = true;
+      break;
+    }
   }
 
-  if (buffer[0] == '\0') {
-    PRINTLN(F("Timeout while waiting respose from modem!"));
+  if (!promptFound) {
+    PRINT(cmd);
+    PRINTLN(F(" failed! Timeout while waiting for prompt!"));
     modemInit();
-  } else {
-    PRINT(F("Send SMS: "));
-    PRINTLN(buffer);
+    return false;
   }
+
+  modem.print(text);
+  modem.print(F("\x1a"));
+
+  result = modemCheckResponse(cmd, 10000);
+  PRINT("Send SMS: ");
+  PRINTLN(buffer);
+
+  return result;
 }
 
 void sendSms_P(const char *text) {
