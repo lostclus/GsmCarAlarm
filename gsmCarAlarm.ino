@@ -185,8 +185,6 @@ void pinControl() {
 #ifdef WITH_CONSOLE
 void consoleControl() {
   char input[50];
-  int len;
-  unsigned int vin;
   
   if (!Serial.available()) return;
   
@@ -198,12 +196,7 @@ void consoleControl() {
   if (streq_P(input, PSTR("alarm status disarm"))) setAlarmStatus(STATUS_DISARM);
   if (streq_P(input, PSTR("alarm status arm"))) setAlarmStatus(STATUS_ARM);
   if (streq_P(input, PSTR("alarm status panic"))) setAlarmStatus(STATUS_PANIC);
-  if (streq_P(input, PSTR("modem status"))) showModemStatus();
   if (streq_P(input, PSTR("modem init"))) modemInit();
-  if (streq_P(input, PSTR("modem reg"))) showModemReg();
-  if (streq_P(input, PSTR("modem level"))) showModemLevel();
-  if (streq_P(input, PSTR("modem hangup"))) modemHangup();
-  if (streq_P(input, PSTR("modem shutdown"))) modemShutdown();
   if (!strncmp_P(input, PSTR("at"), 2) ||
       !strncmp_P(input, PSTR("AT"), 2)) modem.println(input);
   if (streq_P(input, PSTR("sms on"))) {
@@ -586,41 +579,6 @@ void call() {
   modemReadData();
 
   PRINT(F("Call: "));
-  PRINTLN(buffer);
-}
-
-void showModemStatus() {
-  modemSendCommand_P(PSTR("AT+CPAS"), 0);
-  modemReadData();
-  PRINT(F("Modem status: "));
-  PRINTLN(buffer);
-}
-
-void showModemReg() {
-  modemSendCommand_P(PSTR("AT+CREG?"), 0);
-  modemReadData();
-  PRINT(F("Modem registration: "));
-  PRINTLN(buffer);
-}
-
-void showModemLevel() {
-  modemSendCommand_P(PSTR("AT+CSQ"), 0);
-  modemReadData();
-  PRINT(F("Modem signal level: "));
-  PRINTLN(buffer);
-}
-
-void modemShutdown() {
-  modemSendCommand_P(PSTR("AT+CPWROFF"), 0);
-  modemReadData();
-  PRINT(F("Modem shutdown: "));
-  PRINTLN(buffer);
-}
-
-void modemHangup() {
-  modemSendCommand_P(PSTR("ATH1"), 0);
-  modemReadData();
-  PRINT(F("Modem hangup: "));
   PRINTLN(buffer);
 }
 
