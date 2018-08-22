@@ -21,7 +21,6 @@
 #define BACKUP_POWER_PIN 6
 #endif
 
-#define TONE_PIN 7
 #define LED_PIN 13
 #define VIN_ANALOG_PIN 0
 #define VIN_R1 100000L
@@ -33,11 +32,6 @@
 
 #define SETTINGS_MAGICK 0x5555
 #define SETTINGS_ADDR 0
-
-#define TONE_NO_TONE 0
-#define TONE_DISARM 1
-#define TONE_ARM 2
-#define TONE_PANIC 3
 
 struct Settings {
   int magick;
@@ -73,8 +67,6 @@ boolean onBackupPower = false;
 
 unsigned long modemInitTime = 0;
 bool modemRing = false;
-unsigned long toneStartTime = 0;
-int toneType = TONE_NO_TONE;
 
 #ifdef WITH_CONSOLE
 #define PRINT(x) Serial.print(x)
@@ -186,43 +178,6 @@ void pinControl() {
       digitalWrite(LED_PIN, LOW);
     }
     PRINTLN(F("done"));
-  }
-
-  if (toneType != TONE_NO_TONE) {
-    if (toneStartTime == 0) {
-      toneStartTime = currentTime;
-    }
-    i = toneStartTime - currentTime;
-  }
-  switch (toneType) {
-    case TONE_NO_TONE:
-      noTone(TONE_PIN);
-      break;
-    case TONE_DISARM:
-      if (i < 500 || (1000 <= i < 1500)) {
-        tone(TONE_PIN, 880 + (i % 1000) / 10);
-      } else {
-        noTone(TONE_PIN);
-      }
-      if (i >= 1500) {
-        toneType = TONE_NO_TONE;
-        toneStartTime = 0;
-      }
-      break;
-    case TONE_ARM:
-      if (i < 500) {
-        tone(TONE_PIN, 880 + i / 10);
-      } else {
-        noTone(TONE_PIN);
-      }
-      if (i >= 500) {
-        toneType = TONE_NO_TONE;
-        toneStartTime = 0;
-      }
-      break;
-    case TONE_PANIC:
-      tone(TONE_PIN, 880 + 440 * sin(3.14 * (i / 1000.0)));
-      break;
   }
 }
 
@@ -361,13 +316,10 @@ void modemControl() {
       if (modemSendCommand_P(PSTR("ATA"), 5000)) {
         switch (alarmStatus) {
           case STATUS_DISARM:
-            toneType = TONE_DISARM;
             break;
           case STATUS_ARM:
-            toneType = TONE_ARM;
             break;
           case STATUS_PANIC:
-            toneType = TONE_PANIC;
             break;
         }
       }
