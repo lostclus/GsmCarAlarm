@@ -1,6 +1,4 @@
 // TODO: SMS forwarding
-// TODO: DTMF commands support
-// TODO: Send some sound signal or melody when calling or answering
 
 #include <string.h>
 #include <EEPROM.h>
@@ -11,6 +9,9 @@
 
 #define WITH_BACKUP_POWER
 //#undef WITH_BACKUP_POWER
+
+#define WITH_DTMF
+//#undef WITH_DTMF
 
 #define MODEM_RX_PIN 2
 #define MODEM_TX_PIN 3
@@ -32,7 +33,6 @@
 
 #define SETTINGS_MAGICK 0x5555
 #define SETTINGS_ADDR 0
-
 
 struct Settings {
   int magick;
@@ -67,7 +67,6 @@ boolean onBackupPower = false;
 #endif
 
 unsigned long modemInitTime = 0;
-bool modemRing = false;
 
 #ifdef WITH_CONSOLE
 #define PRINT(x) Serial.print(x)
@@ -271,6 +270,26 @@ boolean modemSendCommand_P(const char *command, int resposeTimeout) {
   return modemSendCommand(strcpy_P(cmd, command), resposeTimeout);
 }
 
+boolean modemSendCommandWithRetry(const char *command, int resposeTimeout,
+                                  int retryCount, int retryDelay) {
+    for (; retryCount > 0; retryCount--) {
+      if (modemSendCommand(command, resposeTimeout))
+        return true;
+      delay(retryDelay);
+    }
+    return false;
+}
+
+boolean modemSendCommandWithRetry_P(const char *command, int resposeTimeout,
+                                  int retryCount, int retryDelay) {
+    for (; retryCount > 0; retryCount--) {
+      if (modemSendCommand_P(command, resposeTimeout))
+        return true;
+      delay(retryDelay);
+    }
+    return false;
+}
+
 void modemInit() {
   PRINTLN(F("Initializing modem..."));
   modem.begin(19200);
@@ -282,6 +301,10 @@ void modemInit() {
   modemSendCommand_P(PSTR("AT+CSCS=\"GSM\""), 5000); // select charset to GSM (7bit)
   modemSendCommand_P(PSTR("AT+CMGD=1,4"), 5000); // delete all SMS messages
   modemSendCommand_P(PSTR("AT+CNMI=2,1"), 5000); // new SMS message indication
+  modemSendCommand_P(PSTR("AT+COLP=1"), 5000); // enable +COLP notification
+  #ifdef WITH_DTMF
+  modemSendCommand_P(PSTR("AT+DDET=1"), 5000); // enable DTMF detection
+  #endif
   #ifndef WITH_CONSOLE
   modemSendCommand_P(PSTR("AT&W"), 5000); // write current profile
   #endif
@@ -304,20 +327,27 @@ void modemControl() {
   modem.setTimeout(500);
   modemReadData();
 
-  if (strstr_P(buffer, PSTR("RING\r"))) {
+  if (strstr_P(buffer, PSTR("+CLIP:"))) {
     PRINTLN(F("Ring detected"));
-    modemRing = true;
-  }
 
-  if (modemRing && strstr_P(buffer, PSTR("+CLIP:"))) {
     isAuthorized = strstr(buffer, settings.clientPhone) != NULL;
-    for (int i=0; i<5; i++) {
-      if (modemSendCommand_P(PSTR("ATH1"), 2000)) break;
-      delay(1000);
+    #ifdef WITH_DTMF
+    if (isAuthorized) {
+      if (modemSendCommand_P(PSTR("ATA"), 10000))
+        toneAlarmStatus();
     }
-    modemRing = false;
+    #else
+    modemSendCommandWithRetry_P(PSTR("ATH1"), 2000, 5, 1000);
     delay(500);
-    if (isAuthorized) sendAlarmStatus();
+    if (isAuthorized)
+      sendAlarmStatus();
+    #endif
+  } else if (strstr_P(buffer, PSTR("+COLP:"))) {
+    PRINTLN(F("Answer received"));
+
+    #ifdef WITH_DTMF
+    toneAlarmStatus();
+    #endif
   } else if (strstr_P(buffer, PSTR("+CMTI:"))) {
     PRINTLN(F("New SMS arrived"));
 
@@ -414,6 +444,17 @@ void modemControl() {
       PRINT(F("Unable to read message number: "));
       PRINTLN(buffer);
     }
+  #ifdef WITH_DTMF
+  } else if (strstr_P(buffer, PSTR("+DTMF: 0\r"))) {
+    PRINTLN(F("DTMF: 0"));
+    toneAlarmStatus();
+  } else if (strstr_P(buffer, PSTR("+DTMF: 1\r"))) {
+    PRINTLN(F("DTMF: 1"));
+    sendSms(getStatusText(buf));
+  } else if (strstr_P(buffer, PSTR("+DTMF: 8\r"))) {
+    PRINTLN(F("DTMF: 8"));
+    modemInit();
+  #endif
   } else {
     PRINT(F("Modem data arrived: "));
     PRINTLN(buffer);
@@ -506,6 +547,22 @@ void sendAlarmStatus() {
   }
 }
 
+#ifdef WITH_DTMF
+void toneAlarmStatus() {
+  switch (alarmStatus) {
+    case STATUS_DISARM:
+      modemSendCommand_P(PSTR("AT+VTS=\"1,C,C\""), 5000);
+      break;
+    case STATUS_ARM:
+      modemSendCommand_P(PSTR("AT+VTS=\"1,C\""), 5000);
+      break;
+    case STATUS_PANIC:
+      modemSendCommand_P(PSTR("AT+VTS=\"1,C,C,C,C\""), 10000);
+      break;
+  }
+}
+#endif
+
 void setAlarmStatus(int newStatus) {
   if (newStatus == alarmStatus) return;
   
@@ -533,7 +590,7 @@ boolean sendSms(const char *text) {
   boolean promptFound, result;
   char cmd[30];
 
-  modemSendCommand_P(PSTR("ATH1"), 5000);
+  modemSendCommandWithRetry_P(PSTR("ATH1"), 2000, 5, 1000);
 
   sprintf_P(cmd,
             PSTR("AT+CMGS=\"%s\""),
@@ -578,11 +635,7 @@ void call() {
   sprintf_P(cmd, PSTR("ATD%s;"),
             settings.clientPhone);
   modemSendCommand(cmd, 0);
-  modem.setTimeout(1000);
-  modemReadData();
-
-  PRINT(F("Call: "));
-  PRINTLN(buffer);
+  PRINT(F("Calling..."));
 }
 
 void showVinput() {
