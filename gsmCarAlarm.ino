@@ -326,6 +326,7 @@ void modemInit() {
   modemSendCommand_P(PSTR("AT+CSCS=\"GSM\""), 5000); // select charset to GSM (7bit)
   modemSendCommand_P(PSTR("AT+CMGD=1,4"), 5000); // delete all SMS messages
   modemSendCommand_P(PSTR("AT+CNMI=2,1"), 5000); // new SMS message indication
+  modemSendCommand_P(PSTR("AT+DDET=1"), 5000); // enable DTMF detection
   #ifndef WITH_CONSOLE
   modemSendCommand_P(PSTR("AT&W"), 5000); // write current profile
   #endif
@@ -477,6 +478,10 @@ void modemControl() {
       PRINT(F("Unable to read message number: "));
       PRINTLN(buffer);
     }
+  } else if (strstr_P(buffer, PSTR("+DTMF: 1\r"))) {
+    sendSms(getStatusText(buf));
+  } else if (strstr_P(buffer, PSTR("+DTMF: 8\r"))) {
+    modemInit();
   } else {
     PRINT(F("Modem data arrived: "));
     PRINTLN(buffer);
