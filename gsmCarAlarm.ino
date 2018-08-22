@@ -22,6 +22,7 @@
 #define BACKUP_POWER_PIN 6
 #endif
 
+#define SYSTEM_RESET_PIN 7
 #define LED_PIN 13
 #define VIN_ANALOG_PIN 0
 #define VIN_R1 100000L
@@ -80,15 +81,18 @@ unsigned long modemInitTime = 0;
 
 
 void setup() {
+  digitalWrite(SYSTEM_RESET_PIN, HIGH);
+
   pinMode(ALARM_ALARM_PIN, INPUT);
   pinMode(RESET_SETTINGS_PIN, INPUT_PULLUP);
   #ifdef WITH_BACKUP_POWER
   pinMode(BACKUP_POWER_PIN, INPUT);
   #endif
+  pinMode(SYSTEM_RESET_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
+
   analogReference(DEFAULT);
   analogWrite(VIN_ANALOG_PIN, 0);
-
   digitalWrite(LED_PIN, LOW);
   
   #ifdef WITH_CONSOLE
@@ -454,6 +458,9 @@ void modemControl() {
   } else if (strstr_P(buffer, PSTR("+DTMF: 8\r"))) {
     PRINTLN(F("DTMF: 8"));
     modemInit();
+  } else if (strstr_P(buffer, PSTR("+DTMF: 9\r"))) {
+    PRINTLN(F("DTMF: 9"));
+    digitalWrite(SYSTEM_RESET_PIN, LOW);
   #endif
   } else {
     PRINT(F("Modem data arrived: "));
