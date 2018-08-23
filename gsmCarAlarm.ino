@@ -520,9 +520,9 @@ char *getStatusText(char *str) {
 		"Vinput",
 		#endif
 		vin / 1000, vin % 1000 / 100,
-    int(uptime / (24 * 3600)),
-    int((uptime % (24 * 3600)) / 3600),
-    int((uptime % 3600) / 60));
+    int(uptime / (24UL * 3600UL)),
+    int((uptime % (24UL * 3600UL)) / 3600UL),
+    int((uptime % 3600UL) / 60UL));
   return str;
 }
 
