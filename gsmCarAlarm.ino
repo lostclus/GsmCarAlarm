@@ -4,8 +4,8 @@
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
 
-#define WITH_CONSOLE
-//#undef WITH_CONSOLE
+//#define WITH_CONSOLE
+#undef WITH_CONSOLE
 
 #define WITH_BACKUP_POWER
 //#undef WITH_BACKUP_POWER
@@ -318,7 +318,7 @@ void modemInit() {
 }
 
 void modemControl() {
-  char buf[200], cmd[15], *c, *head, *phone, *body;
+  char buf[400], cmd[15], *c, *head, *phone, *body;
   int msgN = 0;
   boolean isAuthorized;
 
@@ -400,8 +400,15 @@ void modemControl() {
             if (c != NULL && (c -= 2) >= body && streq_P(c, PSTR("OK")))
               for (*c = '\0'; *c <= ' '; c--) *c = '\0';
           } else {
+            for (c = head; c < body || *c != '\0'; c++)
+              if (*c < ' ') *c = ' ';
             PRINT(F("Unauthorized message: "));
-            PRINTLN(buffer);
+            PRINTLN(head);
+            PRINTLN(F("Forwarding..."));
+            strncpy(buf, head, sizeof(buf));
+            buf[sizeof(buf) / sizeof(buf[0]) - 1] = '\0';
+            sendSms(buf);
+            head = body = NULL;
           }
         } else {
           PRINT(F("Read message failure: No header found"));
