@@ -1,4 +1,10 @@
-// TODO: SMS forwarding
+// GsmCarAlarm sketch for Arduino
+// (c) 2017-2019 Konstantin Korikov <lostclus@gmail.com>
+//
+// Schematic diagram:
+// https://docs.google.com/drawings/d/1AUpTfRyy8JJtknP4JrCdES3c87sR4S1v2yHYPFjTOAM/
+//
+// TODO: translate PDU data to ASCII translitaration in SMS forwarding
 
 #include <string.h>
 #include <EEPROM.h>
